@@ -65,8 +65,14 @@ with tempfile.TemporaryDirectory(prefix="work-live-") as directory:
         time.sleep(0.2)
         before = inspect()
         work("save", name)
-        tmux("kill-server")
+        snapshot = base / "state/projects" / name / "resurrect/last"
+        saved = snapshot.read_bytes()
+        work("kill", name)
         time.sleep(0.2)
+        if tmux("has-session", check=False).returncode == 0:
+            raise AssertionError("work kill left its project server running")
+        if snapshot.read_bytes() != saved:
+            raise AssertionError("work kill changed the saved snapshot")
         work("open", name, "--no-attach")
         time.sleep(0.2)
         after = inspect()

@@ -75,7 +75,13 @@ if tool == "tmux":
     if command == "has-session":
         sys.exit(0 if state and state["panes"] else 1)
     if command == "kill-server":
-        (base / (socket + ".json")).unlink(missing_ok=True)
+        if os.environ.get("FAKE_FAIL_KILL"):
+            print("Deliberate kill failure", file=sys.stderr)
+            sys.exit(31)
+        if state is None:
+            print("No server running", file=sys.stderr)
+            sys.exit(1)
+        (base / (socket + ".json")).unlink()
         sys.exit(0)
     if command == "new-session":
         name = args[args.index("-s") + 1]

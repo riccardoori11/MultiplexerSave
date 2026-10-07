@@ -314,6 +314,13 @@ void save_project(const Paths& paths, const std::string& name, bool quiet) {
     }
     if (!quiet) std::cout << "Saved " << name << "\n";
 }
+void kill_project(const Paths& paths, const std::string& name) {
+    validate_name(name);
+    require_executable("tmux");
+    ProjectLock lock(paths, name);
+    tmux_check(name, {"kill-server"}, "Cannot kill project '" + name + "'");
+    std::cout << "Killed " << name << "\n";
+}
 void open_project(const Paths& paths, const std::string& name, bool no_attach, bool fresh) {
     const auto project = read_project(paths, name);
     require_executable("tmux");
@@ -412,6 +419,7 @@ void help() {
         "  work init NAME [--root DIRECTORY] Create a project configuration\n"
         "  work open [NAME] [--no-attach] [--fresh]\n"
         "  work save [NAME] [--quiet]        Save a running project\n"
+        "  work kill [NAME]                  Stop a project server without saving\n"
         "  work list                        List projects and their state\n"
         "  work config NAME                 Print the editable configuration path\n"
         "  work doctor                      Check dependencies\n\n"
@@ -454,7 +462,7 @@ int main_impl(int argc, char** argv) {
                   << "\nOpen: work open " << name << "\n";
         return 0;
     }
-    if (command == "open" || command == "save") {
+    if (command == "open" || command == "save" || command == "kill") {
         std::optional<std::string> name;
         bool no_attach = false, fresh = false, quiet = false;
         for (int i = 2; i < argc; ++i) {
@@ -469,7 +477,8 @@ int main_impl(int argc, char** argv) {
         if (!name) name = current_project(paths);
         validate_name(*name);
         if (command == "open") open_project(paths, *name, no_attach, fresh);
-        else save_project(paths, *name, quiet);
+        else if (command == "save") save_project(paths, *name, quiet);
+        else kill_project(paths, *name);
         return 0;
     }
     throw std::runtime_error("Unknown command: " + command + ". Run work --help.");

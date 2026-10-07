@@ -90,17 +90,28 @@ To save explicitly, use `work save demo`, or press the tmux prefix followed by
 | `work open [NAME] --fresh` | Use the configuration when the project's server is stopped |
 | `work save [NAME]` | Save a running workspace |
 | `work save [NAME] --quiet` | Save without printing the success message |
+| `work kill [NAME]` | Stop the project's tmux server and its panes without saving |
 | `work list` | List configured projects as `configured`, `saved`, or `running` |
 | `work config NAME` | Print the existing configuration file's path |
 | `work doctor` | Check dependencies and display configuration/state paths |
 | `work --help` | Show CLI usage |
 | `work --version` | Show the version |
 
-When `open` or `save` omits the name, `WORK_PROJECT` takes precedence over the
-stored last project. `work init` refuses to overwrite an existing configuration.
+When `open`, `save`, or `kill` omits the name, `WORK_PROJECT` takes precedence over
+the stored last project. `work init` refuses to overwrite an existing configuration.
 
 Interactive opening requires a regular terminal outside tmux. Use `--no-attach`
 for headless preparation. Saving works from inside tmux.
+
+`work kill NAME` keeps the project's configuration and existing snapshots. To
+save the latest workspace before stopping it, run:
+
+```bash
+work save demo && work kill demo
+```
+
+Killing works even if the configuration is invalid or missing, and requires only
+tmux. It reports an error if the project's server is already stopped.
 
 ### Configuration versus snapshot
 
@@ -111,8 +122,8 @@ Opening follows this order:
 3. Create the initial layout from its configuration.
 
 Edits to startup pane commands and layouts apply when creating a workspace.
-To use the configuration instead of a snapshot, stop the project's server
-through your normal tmux workflow and run `work open NAME --fresh`.
+To use the configuration instead of a snapshot, run `work kill NAME`, then
+`work open NAME --fresh`.
 `--fresh` reuses a running server and retains the previous snapshot until a
 subsequent save replaces it.
 
@@ -235,10 +246,12 @@ make -j
 make test
 ```
 
-The 32 integration tests use controlled external tools and temporary directories.
+The 39 integration tests use controlled external tools and temporary directories.
 They cover project isolation, concurrent opening, save/restore failures,
 malformed snapshots, detach saves, invalid or missing configuration, and a
-7,000-pane save/restore with listings larger than 64 KiB.
+7,000-pane save/restore with listings larger than 64 KiB. Kill coverage includes
+project isolation, name selection, locking, command failures, and preservation
+of configuration and snapshots.
 
 For a round trip with real dependencies installed:
 
@@ -246,10 +259,10 @@ For a round trip with real dependencies installed:
 python3 tests/live_smoke.py ./build/work
 ```
 
-The live test creates an isolated project, adds a pane, saves, stops its own
-server, restores, and compares directories, pane structure, layouts, and active
-selections. See [VALIDATION.md](VALIDATION.md) for recorded results and remaining
-editor, desktop, and upstream-version testing gaps.
+The live test creates an isolated project, adds a pane, saves, uses `work kill`
+to stop its own server, restores, and compares directories, pane structure,
+layouts, and active selections. See [VALIDATION.md](VALIDATION.md) for recorded
+results and remaining editor, desktop, and upstream-version testing gaps.
 
 | File | Responsibility |
 | --- | --- |

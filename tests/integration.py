@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Subprocess integration tests without installing or touching real tmux."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -39,7 +40,8 @@ class Integration(unittest.TestCase):
                         WORK_RESURRECT_DIR=str(plugin), WORK_FAKE_STATE=str(self.fake_state),
                         PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
         for key in ("TMUX", "TMUX_PANE", "WORK_PROJECT", "FAKE_FAIL_START", "FAKE_FAIL_SAVE",
-                    "FAKE_FAIL_RESTORE", "FAKE_INCOMPLETE_RESTORE", "FAKE_NO_SAVE", "FAKE_BAD_SAVE", "FAKE_NO_CHANGE"):
+                    "FAKE_FAIL_RESTORE", "FAKE_INCOMPLETE_RESTORE", "FAKE_NO_SAVE", "FAKE_BAD_SAVE", "FAKE_NO_CHANGE",
+                    "FAKE_FAIL_KILL"):
             self.env.pop(key, None)
 
     def call(self, *args, code=0, **extra):
@@ -221,6 +223,106 @@ class Integration(unittest.TestCase):
         self.assertNotEqual(self.snapshot("alpha").read_text(), self.snapshot("beta").read_text())
         plugins = [x for x in self.calls() if x["tool"] in ("save", "restore")]
         self.assertTrue(all("/work-" in x["TMUX"] for x in plugins))
+
+    def test_kill_only_stops_target_and_preserves_saved_workspace(self):
+        for name in ("alpha", "beta"):
+            self.init(name)
+            self.start(name)
+        self.call("save", "alpha")
+        snapshot = self.snapshot("alpha").read_bytes()
+        target = self.snapshot("alpha").readlink()
+        config = (self.config / "projects/alpha.work").read_bytes()
+        beta = (self.fake_state / "work-beta.json").read_bytes()
+        before = len(self.calls())
+        self.assertEqual(self.call("kill", "alpha", WORK_PROJECT="beta",
+                                   TMUX="/tmp/tmux-fixture/work-beta,1000,0"), "Killed alpha\n")
+        self.assertFalse((self.fake_state / "work-alpha.json").exists())
+        self.assertEqual((self.fake_state / "work-beta.json").read_bytes(), beta)
+        self.assertEqual((self.config / "projects/alpha.work").read_bytes(), config)
+        self.assertEqual(self.snapshot("alpha").read_bytes(), snapshot)
+        self.assertEqual(self.snapshot("alpha").readlink(), target)
+        self.assertEqual((self.state / "last-project").read_text(), "beta\n")
+        self.assertEqual(self.calls()[before:], [
+            {"tool": "tmux", "args": ["-L", "work-alpha", "kill-server"], "TMUX": None}])
+        self.assertIn("Restored alpha", self.start("alpha"))
+
+    def test_kill_uses_current_project_then_last_project(self):
+        for name in ("alpha", "beta"):
+            self.init(name)
+            self.start(name)
+        self.assertEqual(self.call("kill", WORK_PROJECT="alpha"), "Killed alpha\n")
+        self.assertFalse((self.fake_state / "work-alpha.json").exists())
+        self.assertTrue((self.fake_state / "work-beta.json").exists())
+        self.assertEqual(self.call("kill"), "Killed beta\n")
+        self.assertFalse((self.fake_state / "work-beta.json").exists())
+        self.assertFalse(any(call["tool"] == "save" for call in self.calls()))
+
+    def test_kill_works_with_invalid_or_missing_config_and_plugin(self):
+        for name, content in (("broken", "invalid_setting = yes\n"), ("missing", None)):
+            with self.subTest(name=name):
+                self.init(name)
+                self.start(name)
+                config = self.config / "projects" / (name + ".work")
+                if content is None:
+                    config.unlink()
+                else:
+                    config.write_text(content)
+                self.assertEqual(self.call("kill", name, WORK_RESURRECT_DIR="/missing/plugin"),
+                                 "Killed " + name + "\n")
+                self.assertFalse((self.fake_state / ("work-" + name + ".json")).exists())
+                self.assertEqual(config.read_text() if config.exists() else None, content)
+                self.assertFalse(self.snapshot(name).exists())
+
+    def test_kill_rejects_invalid_arguments_before_process_launch(self):
+        for name in ("../oops", "a.b", "a:b", "two words", "a" * 49):
+            with self.subTest(name=name):
+                self.assertIn("Project names must", self.call("kill", name, code=1))
+        for option in ("--quiet", "--fresh", "--no-attach", "--unknown"):
+            with self.subTest(option=option):
+                self.assertIn("Unknown option", self.call("kill", "demo", option, code=1))
+        self.assertIn("Unexpected argument", self.call("kill", "demo", "other", code=1))
+        self.assertIn("No previous project", self.call("kill", code=1))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.state.exists())
+
+    def test_kill_reports_stopped_project(self):
+        self.init()
+        self.start()
+        self.call("kill", "demo")
+        output = self.call("kill", "demo", code=1)
+        self.assertIn("Cannot kill project 'demo'", output)
+        self.assertIn("No server running", output)
+        self.assertNotIn("Killed demo", output)
+
+    def test_kill_failure_leaves_server_and_snapshot_intact(self):
+        self.init()
+        self.start()
+        self.call("save", "demo")
+        state = (self.fake_state / "work-demo.json").read_bytes()
+        snapshot = self.snapshot().read_bytes()
+        output = self.call("kill", "demo", code=1, FAKE_FAIL_KILL="1")
+        self.assertIn("Cannot kill project 'demo' (exit 31)", output)
+        self.assertIn("Deliberate kill failure", output)
+        self.assertNotIn("Killed demo", output)
+        self.assertEqual((self.fake_state / "work-demo.json").read_bytes(), state)
+        self.assertEqual(self.snapshot().read_bytes(), snapshot)
+
+    def test_kill_waits_for_project_lock(self):
+        self.init()
+        self.start()
+        with (self.state / "projects/demo/lock").open("r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with subprocess.Popen([str(BINARY), "kill", "demo"], env=self.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
+                try:
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        child.wait(timeout=0.3)
+                    self.assertTrue((self.fake_state / "work-demo.json").exists())
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                stdout, stderr = child.communicate(timeout=15)
+                self.assertEqual(child.returncode, 0, stdout + stderr)
+        self.assertFalse((self.fake_state / "work-demo.json").exists())
 
     def test_headless_restore_explicitly_selects_window_and_panes(self):
         self.init()
