@@ -28,6 +28,7 @@ struct Paths {
 };
 std::string trim(std::string text);
 void validate_name(const std::string& name);
+fs::path existing_project_file(const Paths& paths, const std::string& name);
 Project read_project(const Paths& paths, const std::string& name);
 std::string project_template(const fs::path& root);
 std::string tmuxinator_yaml(const Project& project, const fs::path& config);

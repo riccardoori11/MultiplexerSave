@@ -52,7 +52,7 @@ int wait_for(pid_t pid) {
 }
 }
 
-ProcessResult run(const std::vector<std::string>& args, bool capture,
+ProcessResult run(const std::vector<std::string>& args, OutputCapture capture,
                   const Environment& overrides) {
     if (args.empty()) throw std::runtime_error("Cannot run an empty command.");
     std::vector<char*> argv;
@@ -75,11 +75,12 @@ ProcessResult run(const std::vector<std::string>& args, bool capture,
     envp.push_back(nullptr);
 
     int fds[2]{-1, -1};
-    if (capture && ::pipe2(fds, O_CLOEXEC) < 0)
+    const bool captured = capture != OutputCapture::inherit;
+    if (captured && ::pipe2(fds, O_CLOEXEC) < 0)
         throw std::runtime_error("pipe: " + std::string(std::strerror(errno)));
     Descriptor reader(fds[0]), writer(fds[1]);
     SpawnActions actions;
-    if (capture) {
+    if (captured) {
         for (const int target : {STDOUT_FILENO, STDERR_FILENO}) {
             const int error = posix_spawn_file_actions_adddup2(&actions.actions, writer.get(), target);
             if (error) throw std::runtime_error(std::strerror(error));
@@ -96,7 +97,7 @@ ProcessResult run(const std::vector<std::string>& args, bool capture,
 
     ProcessResult result;
     try {
-        if (capture) {
+        if (captured) {
             char buffer[4096];
             for (;;) {
                 const ssize_t count = ::read(reader.get(), buffer, sizeof buffer);
@@ -108,7 +109,8 @@ ProcessResult run(const std::vector<std::string>& args, bool capture,
                 result.output.append(buffer, static_cast<std::size_t>(count));
                 // Keep diagnostics bounded, but always drain the child pipe.
                 constexpr std::size_t limit = 65536;
-                if (result.output.size() > limit) result.output.erase(0, result.output.size() - limit);
+                if (capture == OutputCapture::diagnostic && result.output.size() > limit)
+                    result.output.erase(0, result.output.size() - limit);
             }
         }
     } catch (...) {

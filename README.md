@@ -1,40 +1,25 @@
-# work — a C++ tmux workspace manager
+# work
 
-One command opens your project: reconnect to its running session, restore its
-saved workspace, or create its initial layout.
+A Linux workspace manager built with C++20, tmuxinator, and tmux-resurrect.
+`work` gives each project its own tmux server and saved workspace. Opening a
+project reconnects to its running workspace, restores its snapshot, or creates
+its configured windows and panes.
 
-```bash
-work init multiplexer --root ~/projects/multiplexer
-work open multiplexer
-# Detach with Ctrl-b, then d. The workspace is saved automatically.
-work
-```
+## Requirements
 
-This is a first implementation for **Linux**, written in C++20. It
-coordinates **tmuxinator** and **tmux-resurrect** rather than implementing
-terminal emulation.
+- Linux and a C++20 compiler.
+- Make, or CMake 3.20 or newer.
+- tmux, tmuxinator, Bash, and a tmux-resurrect checkout at runtime.
+- Python 3 for the integration tests.
 
-## What works
+Pane applications such as Neovim and Git must be installed separately.
 
-- One editable project file for roots, windows, pane layouts and startup commands.
-- Automatic attach / restore / create selection.
-- A separate tmux server and snapshot directory for every project.
-- Saving on client detach, including when a terminal connection closes.
-- Manual saving with `work save` or tmux's prefix followed by `Ctrl-s`.
-- Opening the last project by running `work` with no arguments.
-- Optional Vim/Neovim session restoration through resurrect.
-- Dependency diagnostics, project listing, concurrent-operation locks and
-  validation of saved/restored pane structure.
-- Preserving the previous text snapshot if saving fails.
-- Accepting successful saves of an unchanged workspace, and avoiding upstream's
-  same-second snapshot filename collision.
+## Installation
 
-## Install on Fedora
-
-Install a compiler, tmux and the upstream dependencies:
+### Fedora dependencies
 
 ```bash
-sudo dnf install gcc-c++ make tmux ruby rubygems git
+sudo dnf install gcc-c++ make tmux ruby rubygems git python3
 gem install --user-install tmuxinator
 git clone https://github.com/tmux-plugins/tmux-resurrect \
   ~/.tmux/plugins/tmux-resurrect
@@ -42,17 +27,18 @@ git clone https://github.com/tmux-plugins/tmux-resurrect \
 export PATH="$(ruby -r rubygems -e 'puts Gem.user_dir')/bin:$HOME/.local/bin:$PATH"
 ```
 
-Keep the PATH line in your shell configuration if those directories are not
-already present. An existing resurrect checkout can be selected with:
+Add the PATH setting to your shell configuration. If you already have a
+resurrect checkout, select it with:
 
 ```bash
 export WORK_RESURRECT_DIR=/absolute/path/to/tmux-resurrect
 ```
 
-No global TPM configuration is required; `work` loads resurrect into each managed
-server.
+`work` loads resurrect into each managed server; global TPM setup is unnecessary.
 
-Build and install:
+### Build and install
+
+Run from the repository directory:
 
 ```bash
 make -j
@@ -61,8 +47,11 @@ make install
 work doctor
 ```
 
-`make install` defaults to `~/.local/bin/work`. You can change this with
-`make install PREFIX=/your/prefix`. CMake is also supported:
+The binary is built at `build/work` and installed to `~/.local/bin/work`.
+To change the installation prefix, use `make install PREFIX=/your/prefix`.
+You can also run `./build/work` directly without installing it.
+
+For CMake, install CMake separately and run:
 
 ```bash
 cmake -S . -B build-cmake -DCMAKE_INSTALL_PREFIX="$HOME/.local"
@@ -71,18 +60,74 @@ ctest --test-dir build-cmake --output-on-failure
 cmake --install build-cmake
 ```
 
-## Define your workspace
+## Quick start
+
+Choose an existing project directory:
 
 ```bash
-work init multiplexer --root ~/projects/multiplexer
-nvim "$(work config multiplexer)"
+work init demo --root "$HOME/projects/demo"
+nvim "$(work config demo)"
+work open demo
 ```
 
-The generated project file looks like this:
+The generated template starts Neovim, runs `git status`, and opens two additional
+shell panes. Edit the pane commands before opening if you use other tools.
+
+Detach with the default tmux shortcut, **Ctrl-b, then d**. Your programs keep
+running, and detaching triggers an asynchronous save. Run `work` to reopen the
+current managed project or, outside it, the most recently opened project.
+
+To save explicitly, use `work save demo`, or press the tmux prefix followed by
+**Ctrl-s**. Wait for a successful manual save before shutting down your machine.
+
+## Commands
+
+| Command | Behavior |
+| --- | --- |
+| `work init NAME [--root DIRECTORY]` | Create a configuration; the root defaults to the current directory |
+| `work` or `work open [NAME]` | Reconnect, restore, or create, then attach |
+| `work open [NAME] --no-attach` | Prepare the workspace without attaching |
+| `work open [NAME] --fresh` | Use the configuration when the project's server is stopped |
+| `work save [NAME]` | Save a running workspace |
+| `work save [NAME] --quiet` | Save without printing the success message |
+| `work list` | List configured projects as `configured`, `saved`, or `running` |
+| `work config NAME` | Print the existing configuration file's path |
+| `work doctor` | Check dependencies and display configuration/state paths |
+| `work --help` | Show CLI usage |
+| `work --version` | Show the version |
+
+When `open` or `save` omits the name, `WORK_PROJECT` takes precedence over the
+stored last project. `work init` refuses to overwrite an existing configuration.
+
+Interactive opening requires a regular terminal outside tmux. Use `--no-attach`
+for headless preparation. Saving works from inside tmux.
+
+### Configuration versus snapshot
+
+Opening follows this order:
+
+1. Reuse the running project server.
+2. Restore its saved snapshot if one exists.
+3. Create the initial layout from its configuration.
+
+Edits to startup pane commands and layouts apply when creating a workspace.
+To use the configuration instead of a snapshot, stop the project's server
+through your normal tmux workflow and run `work open NAME --fresh`.
+`--fresh` reuses a running server and retains the previous snapshot until a
+subsequent save replaces it.
+
+Opening requires a valid configuration, including when reconnecting or restoring.
+Manual and detach saves continue to work if the running project's configuration
+is invalid or temporarily missing. `work config NAME` can locate an existing
+file even when its contents need repair.
+
+## Project configuration
+
+Each project is defined in `projects/NAME.work` under the configuration directory:
 
 ```ini
-# Values are literal. Do not quote paths or commands.
-root = /home/riccardo/projects/multiplexer
+# Values are literal; do not wrap the entire value in quotes.
+root = /home/user/projects/demo
 editor_sessions = true
 
 [window code]
@@ -96,155 +141,132 @@ pane = git status
 pane =
 ```
 
-Each `[window NAME]` creates a window. Each `pane = COMMAND` creates a pane and
-sends the command to its shell. A blank command leaves a shell ready for use.
-Commands are intentionally shell commands: variables, pipelines and scripts
-work as they would when typed into a terminal.
+Global settings go before the first window. Each window needs at least one
+`pane` line; a blank value opens a shell. Commands are sent to the pane's shell
+and may contain normal shell quoting, variables, pipelines, and scripts.
 
-Layouts: `main-vertical`, `main-horizontal`, `even-vertical`,
-`even-horizontal`, or `tiled`.
-
-Global settings must come before the first window. Names use letters, digits,
-underscores and hyphens; paths and commands can contain spaces and quotes.
-Root paths must be absolute or start with `~/`.
-
-The initial template assumes you have `nvim` and `git`. Edit those commands to
-match your environment; the wrapper does not install pane applications.
-
-### Template versus snapshot
-
-The project file defines your starting arrangement. Once a snapshot exists,
-`work open` restores that snapshot, including layout changes made interactively.
-To use a changed project file instead, when its server is not running:
-
-```bash
-work open multiplexer --fresh
-```
-
-`--fresh` never restarts a running workspace or deletes its snapshot. If the
-workspace is running, it is reused.
-
-## Everyday commands
-
-| Command | Behavior |
+| Setting | Meaning |
 | --- | --- |
-| `work` | Open the most recently opened project |
-| `work open NAME` | Attach, restore or create |
-| `work open NAME --no-attach` | Prepare the workspace without attaching |
-| `work save NAME` | Save that running project |
-| `work save` | Save the current managed project, or the most recent one |
-| `work list` | List configured, saved and running projects |
-| `work config NAME` | Print the editable project file's path |
-| `work doctor` | Check dependencies and show configuration/state paths |
+| `root` | Required absolute project path, or a path beginning with `~/` |
+| `editor_sessions` | `true` or `false`; defaults to `true` |
+| `resurrect_processes` | Optional upstream process-matching configuration |
+| `[window NAME]` | Start a named window section |
+| `layout` | Defaults to `main-vertical` |
+| `pane` | Repeat for each pane and its startup command |
 
-Run interactive opening from a regular terminal. This version keeps projects
-on separate servers, so it avoids nesting one tmux session inside another.
-Detaching leaves your programs running; exiting every shell closes the session.
+Supported layouts are `main-vertical`, `main-horizontal`, `even-vertical`,
+`even-horizontal`, and `tiled`.
 
-Saving on detach runs asynchronously. Use `work save NAME` and wait for success
-before intentionally shutting down the machine. There is no periodic background
-saving yet.
+Project and window names contain 1–48 letters, digits, underscores, or hyphens,
+starting with a letter or digit. Paths may contain internal spaces and quotes.
+Values are trimmed; roots ending in spaces or tabs are unsupported, and
+initialization rejects them. Roots containing newlines are also rejected.
+Lines beginning with `#` are comments; inline comments are not parsed.
 
-## Editor sessions and restored processes
+### Editors and restored programs
 
-`editor_sessions = true` configures resurrect's Vim and Neovim session
-strategies. Your editor must also write a `Session.vim` file. For example:
+`editor_sessions = true` enables resurrect's Vim and Neovim session strategies.
+Your editor must also write a `Session.vim` file, for example:
 
 ```vim
 :mksession! Session.vim
 ```
 
-You can use [vim-obsession](https://github.com/tpope/vim-obsession) to keep that
-session file updated.
+[vim-obsession](https://github.com/tpope/vim-obsession) can keep that file updated.
 
-Resurrect's default supported-program list is retained. To configure additional
-programs, put `resurrect_processes = ...` before the first window, following
-[resurrect's process configuration](https://github.com/tmux-plugins/tmux-resurrect/blob/master/docs/restoring_programs.md).
-For example, a list can include `nvim vim tail`; supplying a list replaces the
-default list, so include the programs you want.
+To customize restored programs, add `resurrect_processes` before the first
+window, following [resurrect's process configuration](https://github.com/tmux-plugins/tmux-resurrect/blob/master/docs/restoring_programs.md):
 
-After a reboot, programs are restarted. Arbitrary process memory and unsaved
-editor text are not checkpointed by this wrapper.
-
-## Configuration and isolation
-
-Defaults:
-
-```text
-~/.config/work/projects/NAME.work
-~/.config/work/tmux.conf
-~/.local/state/work/last-project
-~/.local/state/work/projects/NAME/tmuxinator.yml
-~/.local/state/work/projects/NAME/tmux.conf
-~/.local/state/work/projects/NAME/resurrect/last
+```ini
+resurrect_processes = nvim vim tail
 ```
 
-`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected. `WORK_CONFIG_HOME` and
-`WORK_STATE_HOME` override the complete `work` directories, which is useful for
-testing.
+A supplied list replaces the upstream default list. After a reboot, supported
+programs are restarted; arbitrary process memory and unsaved editor text are
+not checkpointed.
 
-Because upstream resurrect uses some unquoted file redirections, the state
-directory currently must not contain whitespace. Project roots and configuration
-directories can contain whitespace.
+## Storage and tmux isolation
 
-Each project uses the named socket `work-NAME` in tmux's per-user socket
-directory. These socket names are reserved for this tool. Ordinary tmux sessions
-on the default server are not loaded or changed.
+Default locations:
 
-Put your tmux preferences in `~/.config/work/tmux.conf`. The usual
-`~/.tmux.conf` is not automatically sourced: global restore plugins could
-otherwise load unrelated sessions. The wrapper owns the `client-detached`
-hook and the prefix + `Ctrl-s` binding in managed servers.
-
-Snapshot validation checks that pane identities and directories can be restored.
-It does not independently verify every property restored by upstream, such as
-application-internal state. Grouped sessions are not a supported workflow in
-this first version.
-
-## Code tour
-
-| File | Responsibility |
+| Path | Purpose |
 | --- | --- |
-| `src/main.cpp` | CLI, project locks, server setup, attach/restore/create and snapshot checks |
-| `src/project.cpp` | Project parser, generated YAML and atomic file writes |
-| `src/process.cpp` | Direct subprocess execution, pipe handling and child reaping |
-| `include/work/` | Small public interfaces |
-| `tests/integration.py` | CLI integration tests using controlled external tools |
-| `tests/live_smoke.py` | Optional test against real upstream dependencies |
+| `~/.config/work/projects/NAME.work` | Editable project definition |
+| `~/.config/work/tmux.conf` | Shared tmux preferences |
+| `~/.local/state/work/last-project` | Most recently opened project |
+| `~/.local/state/work/projects/NAME/tmuxinator.yml` | Generated startup definition |
+| `~/.local/state/work/projects/NAME/tmux.conf` | Generated project tmux configuration |
+| `~/.local/state/work/projects/NAME/resurrect/last` | Latest snapshot reference |
 
-Subprocess arguments go through `posix_spawnp`, rather than through `system()`.
-Shell quoting is used only where tmux itself requires a shell command, such as
-its detach hook. Project operations are serialized with `flock`; configuration
-and text-state writes use temporary files and atomic renames.
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` change the base directories; `work` is
+appended to each. `WORK_CONFIG_HOME` and `WORK_STATE_HOME` override the complete
+application directories. XDG overrides must be absolute paths.
 
-## Validation
+The state path must contain no whitespace because of upstream resurrect's file
+handling. Configuration directories may contain whitespace.
 
-`make test` runs 24 subprocess integration tests without requiring tmux. They
-cover project isolation, idempotent opening, save/restore routing, malformed
-snapshots, failed launches, failed saves, concurrent opening, and the detach
-hook's lock ordering.
+Each project reserves a named tmux socket, `work-NAME`. Operations target that
+project's server. Put shared preferences in the application's `tmux.conf`;
+the usual `~/.tmux.conf` is not automatically sourced. `work` owns the
+`client-detached` hook and prefix + `Ctrl-s` binding in managed servers.
+Edit the `.work` file and shared preferences rather than generated state files.
 
-For a real round trip with tmux, tmuxinator and resurrect installed:
+## Troubleshooting and limits
+
+- **Missing dependencies:** Run `work doctor`, check PATH, and verify
+  `WORK_RESURRECT_DIR` if using a custom plugin location.
+- **Invalid configuration:** Run `work config NAME` to locate and repair it.
+  A running workspace can still be saved while you edit.
+- **Missing saved working directory:** Restore requires saved directories to
+  exist. Recreate them, or use `--fresh` to start from the configuration.
+- **State path contains whitespace:** Set `WORK_STATE_HOME` to a suitable path.
+  Existing snapshots remain at their old location unless you move them.
+
+Detaching leaves programs running; exiting every shell closes the session.
+There is no periodic background save. Failed saves attempt to preserve the
+previous text snapshot. Validation checks pane identities and saved directory
+availability, without independently verifying application-internal state.
+Grouped tmux sessions are unsupported.
+
+## Development and validation
+
+```bash
+make -j
+make test
+```
+
+The 32 integration tests use controlled external tools and temporary directories.
+They cover project isolation, concurrent opening, save/restore failures,
+malformed snapshots, detach saves, invalid or missing configuration, and a
+7,000-pane save/restore with listings larger than 64 KiB.
+
+For a round trip with real dependencies installed:
 
 ```bash
 python3 tests/live_smoke.py ./build/work
 ```
 
-It creates a temporary project with simple shell panes, adds a pane, saves it,
-stops only its own test server, restores it, and compares pane structure, layout,
-and active pane/window. It does not use your normal project configuration.
+The live test creates an isolated project, adds a pane, saves, stops its own
+server, restores, and compares directories, pane structure, layouts, and active
+selections. See [VALIDATION.md](VALIDATION.md) for recorded results and remaining
+editor, desktop, and upstream-version testing gaps.
 
-See [VALIDATION.md](VALIDATION.md) for checks completed in the build environment
-and the remaining live-test limitation.
+| File | Responsibility |
+| --- | --- |
+| `src/main.cpp` | CLI, locks, tmux setup, workspace lifecycle, snapshot checks |
+| `src/project.cpp` | Configuration parsing, YAML generation, atomic writes |
+| `src/process.cpp` | Subprocess execution, output capture, child handling |
+| `include/work/` | C++ interfaces |
+| `tests/integration.py` | Integration tests with controlled dependencies |
+| `tests/live_smoke.py` | Real dependency smoke test |
 
-## Next increments
+Project operations use per-project locks; configuration and text-state writes
+use temporary files and atomic renames. Subprocesses receive argument vectors
+directly, with shell quoting where tmux requires shell commands.
 
-- Import an existing tmuxinator project.
-- Interactive project picker.
-- Periodic saves with explicit intervals.
-- Dependency/readiness checks for project services.
-- Integration tests across upstream versions and more complete editor tests.
+The status of previously reviewed issues is recorded in
+[problems.md](problems.md). [reproduce.md](reproduce.md) documents the original
+failure scenarios before those fixes.
 
-Upstream projects:
-[tmuxinator](https://github.com/tmuxinator/tmuxinator),
+Upstream projects: [tmuxinator](https://github.com/tmuxinator/tmuxinator) and
 [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect).

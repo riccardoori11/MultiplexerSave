@@ -70,6 +70,45 @@ class Integration(unittest.TestCase):
         self.assertIn(str(self.root), path.read_text())
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_config_path_ignores_invalid_contents(self):
+        self.init()
+        path = self.config / "projects/demo.work"
+        original = path.read_text()
+        for content in (original + "invalid_setting = yes\n", "root =\n", ""):
+            with self.subTest(content=content):
+                path.write_text(content)
+                self.assertEqual(self.call("config", "demo"), str(path) + "\n")
+                self.assertEqual(path.read_text(), content)
+        self.assertEqual(self.calls(), [])
+
+    def test_config_requires_existing_file_and_valid_name(self):
+        self.init()
+        (self.config / "outside.work").write_text("outside project directory\n")
+        (self.config / "projects/directory.work").mkdir()
+        for name in ("missing", "directory"):
+            with self.subTest(name=name):
+                self.assertIn("Unknown project", self.call("config", name, code=1))
+        for name in ("../outside", "-flag", "a.b", "a:b", "two words", "a" * 49):
+            with self.subTest(name=name):
+                self.assertIn("Project names must", self.call("config", name, code=1))
+        self.assertEqual(self.calls(), [])
+
+    def test_init_rejects_root_with_trailing_whitespace(self):
+        for index, suffix in enumerate((" ", "\t")):
+            for collision in (False, True):
+                with self.subTest(suffix=suffix, collision=collision):
+                    name = f"spaces-{index}-{int(collision)}"
+                    trimmed = self.base / name
+                    root = self.base / (name + suffix)
+                    root.mkdir()
+                    if collision:
+                        trimmed.mkdir()
+                    output = self.call("init", name, "--root", str(root), code=1)
+                    self.assertIn("Project root cannot end in whitespace", output)
+                    self.assertFalse((self.config / "projects" / (name + ".work")).exists())
+                    self.assertFalse((self.state / "projects" / name).exists())
+        self.assertEqual(self.calls(), [])
+
     def test_duplicate_init_preserves_edits(self):
         self.init()
         path = self.config / "projects/demo.work"
@@ -115,6 +154,60 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.snapshot().read_text(), before)
         self.assertEqual(sum(x["tool"] == "tmuxinator" for x in self.calls()), 1)
         self.assertEqual((self.state / "last-project").read_text(), "demo\n")
+
+    def test_save_ignores_invalid_or_missing_config(self):
+        for name in ("demo", "other"):
+            self.init(name)
+            self.start(name)
+        other_state = (self.fake_state / "work-other.json").read_text()
+        path = self.config / "projects/demo.work"
+        original = path.read_text()
+        generated = {path: path.read_bytes() for path in
+                     (self.state / "projects/demo/tmux.conf", self.state / "projects/demo/tmuxinator.yml")}
+        for content in (original + "invalid_setting = yes\n", "", None):
+            with self.subTest(content=content):
+                if content is None:
+                    path.unlink()
+                else:
+                    path.write_text(content)
+                self.assertIn("Saved demo", self.call("save", "demo"))
+                self.assertTrue(self.snapshot().is_file())
+                self.assertEqual(path.read_text() if path.exists() else None, content)
+                for generated_path, before in generated.items():
+                    self.assertEqual(generated_path.read_bytes(), before)
+                self.assertEqual((self.fake_state / "work-other.json").read_text(), other_state)
+                self.assertFalse(self.snapshot("other").exists())
+        saves = [call for call in self.calls() if call["tool"] == "save"]
+        self.assertEqual(len(saves), 3)
+        self.assertTrue(all("/work-demo," in call["TMUX"] for call in saves))
+
+    def test_save_validates_project_name_before_process_launch(self):
+        for name in ("../oops", "a.b", "a:b", "two words", "a" * 49):
+            with self.subTest(name=name):
+                self.assertIn("Project names must", self.call("save", name, code=1))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.state.exists())
+
+    def test_large_workspace_save_and_restore_preserves_all_panes(self):
+        self.init()
+        self.start()
+        state_file = self.fake_state / "work-demo.json"
+        state = json.loads(state_file.read_text())
+        state["panes"] = [["demo", 0, index, str(self.root), ""] for index in range(7000)]
+        state_file.write_text(json.dumps(state))
+        for count in (3, 4):
+            listing = "".join("\t".join(map(str, pane[:count])) + "\n" for pane in state["panes"])
+            self.assertGreater(len(listing.encode()), 65536)
+        self.call("save", "demo")
+        snapshot = self.snapshot().read_text()
+        records = [line.split("\t") for line in snapshot.splitlines() if line.startswith("pane\t")]
+        saved = [[record[1], int(record[2]), int(record[5]), record[7][1:], record[10][1:]]
+                 for record in records]
+        self.assertEqual(saved, state["panes"])
+        self.kill()
+        self.assertIn("Restored", self.start())
+        self.assertEqual(json.loads(state_file.read_text())["panes"], state["panes"])
+        self.assertEqual(self.snapshot().read_text(), snapshot)
 
     def test_project_servers_and_snapshots_are_isolated(self):
         for name in ("alpha", "beta"):
@@ -239,6 +332,14 @@ class Integration(unittest.TestCase):
         self.start(code=1, WORK_STATE_HOME=str(self.base / "state with spaces"))
         self.assertEqual(self.calls(), [])
 
+    def test_save_rejects_state_whitespace_before_plugin_runs(self):
+        self.init()
+        self.start()
+        output = self.call("save", "demo", code=1, WORK_STATE_HOME=str(self.base / "state with spaces"))
+        self.assertIn("requires a state path without whitespace", output)
+        self.assertFalse(any(call["tool"] == "save" for call in self.calls()))
+        self.assertFalse(self.snapshot().exists())
+
     def test_concurrent_opens_create_once(self):
         self.init()
         commands = [[str(BINARY), "open", "demo", "--no-attach"]] * 2
@@ -259,6 +360,18 @@ class Integration(unittest.TestCase):
         finally:
             os.close(master)
             os.close(slave)
+
+    def test_detach_hook_saves_with_invalid_config(self):
+        self.init()
+        self.start()
+        path = self.config / "projects/demo.work"
+        path.write_text(path.read_text() + "invalid_setting = yes\n")
+        result = subprocess.run([str(self.bin / "tmux"), "-L", "work-demo", "attach-session"],
+                                env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertTrue(self.snapshot().is_file())
+        self.assertEqual(sum(call["tool"] == "save" for call in self.calls()), 1)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

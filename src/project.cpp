@@ -106,11 +106,16 @@ void write_atomic(const fs::path& path, const std::string& content) {
     }
 }
 
-Project read_project(const Paths& paths, const std::string& name) {
+fs::path existing_project_file(const Paths& paths, const std::string& name) {
     validate_name(name);
     const auto file = paths.project(name);
     if (!fs::is_regular_file(file))
         throw std::runtime_error("Unknown project '" + name + "'. Create it with: work init " + name + " --root DIRECTORY");
+    return file;
+}
+
+Project read_project(const Paths& paths, const std::string& name) {
+    const auto file = existing_project_file(paths, name);
     Project result;
     result.name = name;
     std::istringstream in(read_file(file));
