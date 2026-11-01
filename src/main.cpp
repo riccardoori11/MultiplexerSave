@@ -321,18 +321,27 @@ void kill_project(const Paths& paths, const std::string& name) {
     tmux_check(name, {"kill-server"}, "Cannot kill project '" + name + "'");
     std::cout << "Killed " << name << "\n";
 }
+void delete_project(const Paths& paths, const std::string& name) {
+    validate_name(name);
+    ProjectLock lock(paths, name);
+    const auto file = existing_project_file(paths, name);
+    if (!fs::remove(file))
+        throw std::runtime_error("Cannot delete project configuration: " + file.string());
+    std::cout << "Deleted " << name << "\n";
+}
 void open_project(const Paths& paths, const std::string& name, bool no_attach, bool fresh) {
-    const auto project = read_project(paths, name);
-    require_executable("tmux");
-    if (!no_attach) {
-        if (!::isatty(STDIN_FILENO) || !::isatty(STDOUT_FILENO))
-            throw std::runtime_error("Opening interactively needs a terminal. Use --no-attach for headless startup.");
-        if (const char* value = std::getenv("TMUX"); value && *value)
-            throw std::runtime_error("Open projects from a regular terminal to avoid nesting tmux servers. Saving works from inside tmux.");
-    }
-    const auto plugin = require_plugin();
+    validate_name(name);
     {
         ProjectLock lock(paths, name);
+        const auto project = read_project(paths, name);
+        require_executable("tmux");
+        if (!no_attach) {
+            if (!::isatty(STDIN_FILENO) || !::isatty(STDOUT_FILENO))
+                throw std::runtime_error("Opening interactively needs a terminal. Use --no-attach for headless startup.");
+            if (const char* value = std::getenv("TMUX"); value && *value)
+                throw std::runtime_error("Open projects from a regular terminal to avoid nesting tmux servers. Saving works from inside tmux.");
+        }
+        const auto plugin = require_plugin();
         prepare_config(paths, project);
         if (running(name)) {
             configure_server(paths, project, plugin);
@@ -420,6 +429,7 @@ void help() {
         "  work open [NAME] [--no-attach] [--fresh]\n"
         "  work save [NAME] [--quiet]        Save a running project\n"
         "  work kill [NAME]                  Stop a project server without saving\n"
+        "  work delete NAME                  Delete a saved project configuration\n"
         "  work list                        List projects and their state\n"
         "  work config NAME                 Print the editable configuration path\n"
         "  work doctor                      Check dependencies\n\n"
@@ -441,6 +451,11 @@ int main_impl(int argc, char** argv) {
     if (command == "config") {
         if (argc != 3) throw std::runtime_error("Usage: work config NAME");
         std::cout << existing_project_file(paths, argv[2]).string() << "\n"; return 0;
+    }
+    if (command == "delete") {
+        if (argc != 3) throw std::runtime_error("Usage: work delete NAME");
+        delete_project(paths, argv[2]);
+        return 0;
     }
     if (command == "init") {
         if (argc < 3) throw std::runtime_error("Usage: work init NAME [--root DIRECTORY]");

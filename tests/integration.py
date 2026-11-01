@@ -95,6 +95,127 @@ class Integration(unittest.TestCase):
                 self.assertIn("Project names must", self.call("config", name, code=1))
         self.assertEqual(self.calls(), [])
 
+    def test_delete_removes_configuration_and_allows_reinitializing(self):
+        self.init()
+        path = self.config / "projects/demo.work"
+        self.assertEqual(self.call("delete", "demo"), "Deleted demo\n")
+        self.assertFalse(path.exists())
+        self.assertIn("Unknown project", self.call("config", "demo", code=1))
+        self.assertIn("Unknown project", self.start(code=1))
+        self.assertEqual(self.calls(), [])
+        self.assertNotIn("demo", self.call("list"))
+        self.assertIn("Created demo", self.init())
+        self.assertTrue(path.is_file())
+
+    def test_delete_accepts_invalid_configuration_without_dependencies(self):
+        self.init()
+        path = self.config / "projects/demo.work"
+        path.write_text("invalid_setting = yes\n")
+        self.assertEqual(self.call("delete", "demo", PATH="",
+                                   WORK_RESURRECT_DIR="/missing/plugin"), "Deleted demo\n")
+        self.assertFalse(path.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_delete_preserves_workspaces_and_other_project_configuration(self):
+        marker = self.root / "keep.txt"
+        marker.write_text("project files\n")
+        for name in ("alpha", "beta"):
+            self.init(name)
+            self.start(name)
+            self.call("save", name)
+        beta_config = (self.config / "projects/beta.work").read_bytes()
+        state_files = {path: path.read_bytes() for path in self.state.rglob("*") if path.is_file()}
+        snapshot_targets = {name: self.snapshot(name).readlink() for name in ("alpha", "beta")}
+        servers = {name: (self.fake_state / ("work-" + name + ".json")).read_bytes()
+                   for name in ("alpha", "beta")}
+        calls = self.calls()
+        self.assertEqual(self.call("delete", "alpha", WORK_PROJECT="beta"), "Deleted alpha\n")
+        self.assertFalse((self.config / "projects/alpha.work").exists())
+        self.assertEqual((self.config / "projects/beta.work").read_bytes(), beta_config)
+        self.assertEqual(marker.read_text(), "project files\n")
+        for path, content in state_files.items():
+            self.assertEqual(path.read_bytes(), content)
+        for name in ("alpha", "beta"):
+            self.assertEqual(self.snapshot(name).readlink(), snapshot_targets[name])
+            self.assertEqual((self.fake_state / ("work-" + name + ".json")).read_bytes(), servers[name])
+        self.assertEqual(self.calls(), calls)
+        self.assertEqual(self.call("list"), "beta\trunning\n")
+
+    def test_delete_requires_existing_configuration(self):
+        self.init()
+        directory = self.config / "projects/directory.work"
+        directory.mkdir()
+        marker = directory / "keep.txt"
+        marker.write_text("keep\n")
+        for name in ("missing", "directory"):
+            with self.subTest(name=name):
+                self.assertIn("Unknown project", self.call("delete", name, code=1))
+        self.assertEqual(marker.read_text(), "keep\n")
+        self.assertTrue((self.config / "projects/demo.work").is_file())
+        self.assertEqual(self.calls(), [])
+
+    def test_delete_rejects_invalid_arguments_before_changing_state(self):
+        for args in ((), ("demo", "other"), ("demo", "--quiet")):
+            with self.subTest(args=args):
+                self.assertIn("Usage: work delete NAME", self.call("delete", *args, code=1,
+                                                                  WORK_PROJECT="demo"))
+        for name in ("", "../oops", "-flag", "a.b", "a:b", "two words", "a" * 49):
+            with self.subTest(name=name):
+                self.assertIn("Project names must", self.call("delete", name, code=1))
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_delete_waits_for_project_lock(self):
+        self.init()
+        config = self.config / "projects/demo.work"
+        with (self.state / "projects/demo/lock").open("r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with subprocess.Popen([str(BINARY), "delete", "demo"], env=self.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
+                try:
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        child.wait(timeout=0.3)
+                    self.assertTrue(config.is_file())
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                stdout, stderr = child.communicate(timeout=15)
+                self.assertEqual(child.returncode, 0, stdout + stderr)
+                self.assertEqual(stdout, "Deleted demo\n")
+        self.assertFalse(config.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_delete_unlinks_configuration_symlink_without_removing_target(self):
+        self.init()
+        config = self.config / "projects/demo.work"
+        target = self.base / "shared.work"
+        content = config.read_bytes()
+        target.write_bytes(content)
+        config.unlink()
+        config.symlink_to(target)
+        self.assertEqual(self.call("delete", "demo"), "Deleted demo\n")
+        self.assertFalse(config.is_symlink())
+        self.assertEqual(target.read_bytes(), content)
+        self.assertEqual(self.calls(), [])
+
+    def test_open_rechecks_configuration_after_waiting_for_project_lock(self):
+        self.init()
+        config = self.config / "projects/demo.work"
+        with (self.state / "projects/demo/lock").open("r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with subprocess.Popen([str(BINARY), "open", "demo", "--no-attach"], env=self.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
+                try:
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        child.wait(timeout=0.3)
+                    config.unlink()
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                stdout, stderr = child.communicate(timeout=15)
+                self.assertEqual(child.returncode, 1, stdout + stderr)
+                self.assertIn("Unknown project", stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_init_rejects_root_with_trailing_whitespace(self):
         for index, suffix in enumerate((" ", "\t")):
             for collision in (False, True):

@@ -91,6 +91,7 @@ To save explicitly, use `work save demo`, or press the tmux prefix followed by
 | `work save [NAME]` | Save a running workspace |
 | `work save [NAME] --quiet` | Save without printing the success message |
 | `work kill [NAME]` | Stop the project's tmux server and its panes without saving |
+| `work delete NAME` | Delete the saved project configuration |
 | `work list` | List configured projects as `configured`, `saved`, or `running` |
 | `work config NAME` | Print the existing configuration file's path |
 | `work doctor` | Check dependencies and display configuration/state paths |
@@ -112,6 +113,20 @@ work save demo && work kill demo
 
 Killing works even if the configuration is invalid or missing, and requires only
 tmux. It reports an error if the project's server is already stopped.
+
+To remove a saved configuration, run:
+
+```bash
+work delete "demo"
+```
+
+Deletion requires an explicit project name and removes its `projects/NAME.work`
+file, including when the configuration contents are invalid. It works without
+tmux, tmuxinator, or tmux-resurrect installed. The project directory, running
+workspace, snapshots, and generated state are retained. The project disappears
+from `work list`; opening it again requires recreating its configuration with
+`work init NAME`. The current and last-project selections are retained, so choose
+another project explicitly if either still refers to the deleted configuration.
 
 ### Configuration versus snapshot
 
@@ -246,12 +261,14 @@ make -j
 make test
 ```
 
-The 39 integration tests use controlled external tools and temporary directories.
+The integration tests use controlled external tools and temporary directories.
 They cover project isolation, concurrent opening, save/restore failures,
 malformed snapshots, detach saves, invalid or missing configuration, and a
 7,000-pane save/restore with listings larger than 64 KiB. Kill coverage includes
 project isolation, name selection, locking, command failures, and preservation
 of configuration and snapshots.
+Delete coverage includes argument validation, invalid configurations, dependency
+independence, project isolation, and locking.
 
 For a round trip with real dependencies installed:
 
