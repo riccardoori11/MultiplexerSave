@@ -1,0 +1,23 @@
+flowchart TD
+    User["User: work open / save / kill / init"]
+    Main["main.cpp<br/>CLI and workspace coordination"]
+    Project["project.cpp<br/>Configuration, paths, YAML, atomic writes"]
+    Process["process.cpp<br/>Run external commands and capture results"]
+    Files[("Configuration and state files")]
+    Tmux["tmux<br/>Dedicated server per project"]
+    Inator["tmuxinator<br/>Create initial workspace"]
+    Resurrect["tmux-resurrect<br/>Save and restore workspace"]
+    Apps["Windows and panes<br/>Shells, editors, other programs"]
+
+    User --> Main
+    Main --> Project
+    Project <--> Files
+    Main --> Process
+    Process --> Tmux
+    Process --> Inator
+    Process --> Resurrect
+    Inator --> Tmux
+    Resurrect <--> Tmux
+    Resurrect <--> Files
+    Tmux --> Apps
+    Tmux -. "Detach hook invokes work save" .-> Main

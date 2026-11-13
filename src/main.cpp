@@ -458,7 +458,9 @@ int main_impl(int argc, char** argv) {
         return 0;
     }
     if (command == "init") {
-        if (argc < 3) throw std::runtime_error("Usage: work init NAME [--root DIRECTORY]");
+        if (argc < 3){
+				throw std::runtime_error("Usage: work init NAME [--root DIRECTORY]");
+		}
         const std::string name(argv[2]);
         validate_name(name);
         fs::path root = fs::current_path();

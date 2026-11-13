@@ -1,0 +1,12 @@
+flowchart TD
+    Open["work open demo"] --> Config["Lock project and read configuration"]
+    Config --> Running{"Server already running?"}
+    Running -- Yes --> Reuse["Reuse workspace"]
+    Running -- No --> Saved{"Snapshot exists<br/>and --fresh is absent?"}
+    Saved -- Yes --> Restore["Start server and restore<br/>using tmux-resurrect"]
+    Saved -- No --> Create["Create configured layout<br/>using tmuxinator"]
+    Restore --> Verify["Verify restored panes"]
+    Reuse --> Finish["Remember project and release lock"]
+    Verify --> Finish
+    Create --> Finish
+    Finish --> Attach["Attach unless --no-attach"]
