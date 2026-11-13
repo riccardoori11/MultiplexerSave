@@ -70,8 +70,10 @@ nvim "$(work config demo)"
 work open demo
 ```
 
-The generated template starts Neovim, runs `git status`, and opens two additional
-shell panes. Edit the pane commands before opening if you use other tools.
+The generated template opens two tmux windows: `code` starts Neovim and `tools`
+runs `git status`. Each window has one full-screen pane. Switch windows with
+**Ctrl-b, then n** (next) or **Ctrl-b, then p** (previous). Edit the pane commands
+before opening if you use other tools.
 
 Detach with the default tmux shortcut, **Ctrl-b, then d**. Your programs keep
 running, and detaching triggers an asynchronous save. Run `work` to reopen the
@@ -157,19 +159,17 @@ root = /home/user/projects/demo
 editor_sessions = true
 
 [window code]
-layout = main-vertical
 pane = nvim .
-pane =
 
 [window tools]
-layout = even-horizontal
 pane = git status
-pane =
 ```
 
 Global settings go before the first window. Each window needs at least one
-`pane` line; a blank value opens a shell. Commands are sent to the pane's shell
-and may contain normal shell quoting, variables, pipelines, and scripts.
+`pane` line; a blank value opens a shell. One `pane` line gives the window a
+full-screen terminal. Add more `pane` lines to split it, and set `layout` to
+control how those panes are arranged. Commands are sent to the pane's shell and
+may contain normal shell quoting, variables, pipelines, and scripts.
 
 | Setting | Meaning |
 | --- | --- |
