@@ -10,6 +10,8 @@ target_compile_features(work PRIVATE cxx_std_20)
 target_compile_options(work PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 include(GNUInstallDirs)
 install(TARGETS work RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES completions/bash/work
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions)
 
 include(CTest)
 if(BUILD_TESTING)

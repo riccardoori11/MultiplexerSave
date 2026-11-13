@@ -60,6 +60,33 @@ ctest --test-dir build-cmake --output-on-failure
 cmake --install build-cmake
 ```
 
+### Bash completion
+
+Installation includes a Bash completion script. With `bash-completion` enabled,
+new shells load it automatically from the standard completion directory. To
+enable it in the current shell after the default installation, run:
+
+```bash
+source "$HOME/.local/share/bash-completion/completions/work"
+```
+
+You can also try it directly from the repository after building:
+
+```bash
+export PATH="$PWD/build:$PATH"
+source completions/bash/work
+```
+
+Type `work open l` and press **Tab** to complete a configured project beginning
+with `l`; press **Tab** twice to list multiple matches. Completion also suggests
+commands, their options, and project names for `save`, `kill`, `delete`, and
+`config`. It reads the current configuration paths on each completion, without
+querying tmux or changing project state. `work init NAME --root` completes
+directories.
+
+If your shell does not load completions automatically, add the `source` line to
+`~/.bashrc`. For a custom installation prefix, adjust the path accordingly.
+
 ## Quick start
 
 Choose an existing project directory:
@@ -93,6 +120,7 @@ To save explicitly, use `work save demo`, or press the tmux prefix followed by
 | `work kill [NAME]` | Stop the project's tmux server and its panes without saving |
 | `work delete NAME` | Delete the saved project configuration |
 | `work list` | List configured projects as `configured`, `saved`, or `running` |
+| `work list --names` | Print sorted project names only, without checking tmux |
 | `work config NAME` | Print the existing configuration file's path |
 | `work doctor` | Check dependencies and display configuration/state paths |
 | `work --help` | Show CLI usage |
@@ -269,6 +297,8 @@ project isolation, name selection, locking, command failures, and preservation
 of configuration and snapshots.
 Delete coverage includes argument validation, invalid configurations, dependency
 independence, project isolation, and locking.
+Completion coverage includes project prefixes, command options, configuration
+overrides, and listing names without external dependencies or state changes.
 
 For a round trip with real dependencies installed:
 
