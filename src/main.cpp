@@ -387,24 +387,15 @@ void open_project(const Paths& paths, const std::string& name, bool no_attach, b
         check(tmux(name, {"attach-session"}, OutputCapture::inherit), "Attaching failed");
     }
 }
-void list_projects(const Paths& paths, bool names_only) {
+void list_projects(const Paths& paths) {
     const auto dir = paths.config / "projects";
-    if (!fs::is_directory(dir)) {
-        if (!names_only) std::cout << "No projects. Create one with work init NAME --root DIRECTORY\n";
-        return;
-    }
+    if (!fs::is_directory(dir)) { std::cout << "No projects. Create one with work init NAME --root DIRECTORY\n"; return; }
     std::vector<std::string> names;
     for (const auto& entry : fs::directory_iterator(dir))
         if (entry.is_regular_file() && entry.path().extension() == ".work") names.push_back(entry.path().stem().string());
     std::sort(names.begin(), names.end());
-    const bool has_tmux = !names_only && executable("tmux").has_value();
+    const bool has_tmux = executable("tmux").has_value();
     for (const auto& name : names) {
-        if (names_only) {
-            try { validate_name(name); }
-            catch (const std::runtime_error&) { continue; }
-            std::cout << name << '\n';
-            continue;
-        }
         validate_name(name);
         const bool active = has_tmux && running(name);
         const bool snapshot = fs::is_regular_file(paths.snapshots(name) / "last");
@@ -440,7 +431,6 @@ void help() {
         "  work kill [NAME]                  Stop a project server without saving\n"
         "  work delete NAME                  Delete a saved project configuration\n"
         "  work list                        List projects and their state\n"
-        "  work list --names                List only project names (no tmux checks)\n"
         "  work config NAME                 Print the editable configuration path\n"
         "  work doctor                      Check dependencies\n\n"
         "Each project uses its own tmux server. Detaching automatically saves it.\n"
@@ -453,14 +443,10 @@ int main_impl(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--version") { std::cout << "work 0.1.0\n"; return 0; }
     const Paths paths = Paths::from_environment();
     const std::string command = argc > 1 ? argv[1] : "open";
-    if (command == "doctor") {
+    if (command == "doctor" || command == "list") {
         if (argc > 2) throw std::runtime_error("Unexpected arguments for work " + command);
-        return doctor(paths);
-    }
-    if (command == "list") {
-        const bool names_only = argc == 3 && std::string(argv[2]) == "--names";
-        if (argc > 2 && !names_only) throw std::runtime_error("Usage: work list [--names]");
-        list_projects(paths, names_only); return 0;
+        if (command == "doctor") return doctor(paths);
+        list_projects(paths); return 0;
     }
     if (command == "config") {
         if (argc != 3) throw std::runtime_error("Usage: work config NAME");

@@ -1,4 +1,29 @@
 # Bash completion for work. Can also be sourced directly from ~/.bashrc.
+_work_project_names() (
+    local config_dir path name LC_ALL=C
+    [[ -n ${HOME:-} ]] || return 0
+    if [[ -n ${WORK_CONFIG_HOME:-} ]]; then
+        config_dir=$WORK_CONFIG_HOME
+    elif [[ -n ${XDG_CONFIG_HOME:-} ]]; then
+        [[ $XDG_CONFIG_HOME == /* ]] || return 0
+        config_dir=$XDG_CONFIG_HOME/work
+    else
+        config_dir=$HOME/.config/work
+    fi
+
+    # Keep glob settings local to this subshell.
+    unset GLOBIGNORE
+    shopt -s nullglob
+    shopt -u failglob dotglob nocaseglob
+    for path in "$config_dir"/projects/*.work; do
+        [[ -f $path ]] || continue
+        name=${path##*/}
+        name=${name%.work}
+        [[ $name =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$ ]] || continue
+        printf '%s\n' "$name"
+    done
+)
+
 _work() {
     local cur="${COMP_WORDS[COMP_CWORD]}" command="${COMP_WORDS[1]-}"
     local candidate word used i
@@ -39,7 +64,7 @@ _work() {
                 if (( has_project == 0 )) && [[ $cur != -* ]]; then
                     while IFS= read -r candidate; do
                         candidates+=("$candidate")
-                    done < <("${COMP_WORDS[0]}" list --names 2>/dev/null)
+                    done < <(_work_project_names 2>/dev/null)
                 fi
                 ;;
             init)
@@ -49,9 +74,6 @@ _work() {
                     compopt -o dirnames 2>/dev/null
                     return 0
                 fi
-                ;;
-            list)
-                if (( COMP_CWORD == 2 )); then candidates=(--names); fi
                 ;;
         esac
     fi

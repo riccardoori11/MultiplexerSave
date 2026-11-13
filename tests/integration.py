@@ -567,7 +567,7 @@ class Integration(unittest.TestCase):
         self.kill()
         self.assertIn("saved", self.call("list"))
 
-    def test_list_names_is_sorted_and_ignores_unusable_entries(self):
+    def test_completion_ignores_unusable_project_entries(self):
         projects = self.config / "projects"
         projects.mkdir(parents=True)
         for name in ("zebra", "linux", "alpha", "lab"):
@@ -576,35 +576,26 @@ class Integration(unittest.TestCase):
             (projects / (name + ".work")).write_text("ignored\n")
         (projects / "directory.work").mkdir()
         (projects / "unrelated.txt").write_text("ignored\n")
+        (projects / "uppercase.WORK").write_text("ignored\n")
         (projects / "broken.work").symlink_to(projects / "missing.work")
         (projects / "linked.work").symlink_to(projects / "lab.work")
         for extra in ({}, {"PATH": "", "WORK_RESURRECT_DIR": "/missing/plugin"}):
             with self.subTest(extra=extra):
-                self.assertEqual(self.call("list", "--names", **extra),
-                                 "alpha\nlab\nlinked\nlinux\nzebra\n")
+                self.assertEqual(self.complete("config", "", **extra),
+                                 ["alpha", "lab", "linked", "linux", "zebra"])
         self.assertEqual((projects / "lab.work").read_text(), "invalid configuration\n")
         self.assertFalse(self.state.exists())
         self.assertEqual(self.calls(), [])
 
-    def test_list_names_and_completion_handle_missing_or_empty_configuration(self):
+    def test_completion_handles_missing_or_empty_configuration(self):
         for create_directory in (False, True):
             with self.subTest(create_directory=create_directory):
                 if create_directory:
                     (self.config / "projects").mkdir(parents=True)
-                self.assertEqual(self.call("list", "--names", PATH=""), "")
                 self.assertEqual(self.complete("open", "l", PATH=""), [])
                 self.assertEqual(self.complete("open", "missing", PATH=""), [])
                 self.assertEqual(self.config.exists(), create_directory)
                 self.assertFalse(self.state.exists())
-        self.assertEqual(self.calls(), [])
-
-    def test_list_names_rejects_unexpected_arguments(self):
-        for args in (("--unknown",), ("--names", "extra"), ("--names", "--names")):
-            with self.subTest(args=args):
-                self.assertIn("Usage: work list [--names]", self.call("list", *args, code=1))
-        self.assertIn("Unexpected arguments", self.call("doctor", "--names", code=1))
-        self.assertFalse(self.config.exists())
-        self.assertFalse(self.state.exists())
         self.assertEqual(self.calls(), [])
 
     def test_completion_matches_projects_without_dependencies_or_state_changes(self):
@@ -620,9 +611,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.complete("open", "--fresh", "l"), ["lab", "linux"])
         self.assertEqual(self.complete("open", "--no-attach", "l"), ["lab", "linux"])
         self.assertEqual(self.complete("save", "--quiet", "l"), ["lab", "linux"])
-        executable = self.base / "binary with spaces and 'quotes'"
-        executable.symlink_to(BINARY)
-        self.assertEqual(self.complete("open", "l", binary=executable), ["lab", "linux"])
+        self.assertEqual(self.complete("open", "l", binary="/missing/work"), ["lab", "linux"])
         self.assertFalse(self.state.exists())
         self.assertEqual(self.calls(), [])
 
@@ -642,8 +631,7 @@ class Integration(unittest.TestCase):
                 (("config", "linux", ""), []),
                 (("init", ""), []),
                 (("init", "linux", "--r"), ["--root"]),
-                (("list", "--n"), ["--names"]),
-                (("list", "--names", ""), []),
+                (("list", ""), []),
                 (("doctor", ""), []),
                 (("unknown", ""), []),
                 (("open", "--unknown", ""), [])):
@@ -656,14 +644,14 @@ class Integration(unittest.TestCase):
 
     def test_completion_respects_configuration_overrides_and_silences_errors(self):
         self.init("local")
-        xdg = self.base / "xdg config with spaces"
+        xdg = self.base / "xdg config [*] with spaces"
         (xdg / "work/projects").mkdir(parents=True)
         (xdg / "work/projects/laptop.work").write_text("invalid configuration\n")
         self.assertEqual(self.complete("open", "l", XDG_CONFIG_HOME=str(xdg)), ["local"])
         self.assertEqual(self.complete("open", "l", XDG_CONFIG_HOME=str(xdg),
                                        WORK_CONFIG_HOME=""), ["laptop"])
-        self.assertEqual(self.call("list", "--names", XDG_CONFIG_HOME=str(xdg),
-                                   WORK_CONFIG_HOME=""), "laptop\n")
+        self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME=os.path.relpath(self.config)),
+                         ["local"])
         self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME="",
                                        XDG_CONFIG_HOME="relative"), [])
         self.assertEqual(self.calls(), [])
