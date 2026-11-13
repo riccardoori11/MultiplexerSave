@@ -108,7 +108,7 @@ ProcessResult run(const std::vector<std::string>& args, OutputCapture capture,
                 }
                 result.output.append(buffer, static_cast<std::size_t>(count));
                 // Keep diagnostics bounded, but always drain the child pipe.
-                constexpr std::size_t limit = 65536;
+                constexpr std::size_t limit{65536};
                 if (capture == OutputCapture::diagnostic && result.output.size() > limit)
                     result.output.erase(0, result.output.size() - limit);
             }
