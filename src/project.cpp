@@ -177,12 +177,13 @@ Project read_project(const Paths& paths, const std::string& name) {
 std::string project_template(const fs::path& root) {
     return "# Project configuration for work. Values are literal; do not add quotes.\n"
            "# A blank pane value opens a shell. Edit commands to fit your project.\n"
+           "# Each window starts full-screen. Add pane lines to split a window.\n"
            "root = " + root.string() + "\n"
            "editor_sessions = true\n"
            "# Optional: use resurrect's process matching syntax for additional programs.\n"
            "# resurrect_processes = nvim vim tail\n\n"
-           "[window code]\nlayout = main-vertical\npane = nvim .\npane = \n\n"
-           "[window tools]\nlayout = even-horizontal\npane = git status\npane = \n";
+           "[window code]\npane =\n\n"
+           "[window tools]\npane =\n";
 }
 std::string tmuxinator_yaml(const Project& project, const fs::path& config) {
     std::ostringstream out;

@@ -273,12 +273,14 @@ class Integration(unittest.TestCase):
         self.start(code=1)
         self.assertEqual(self.calls(), [])
 
-    def test_new_workspace_is_generated_and_detached(self):
+    def test_new_workspace_has_two_unsplit_shell_windows_and_is_detached(self):
         self.init()
         self.assertIn("Created workspace", self.start())
         state = json.loads((self.fake_state / "work-demo.json").read_text())
-        self.assertEqual(len(state["panes"]), 4)
-        self.assertEqual(state["panes"][0][3], str(self.root))
+        self.assertEqual(state["panes"], [
+            ["demo", 0, 0, str(self.root), ""],
+            ["demo", 1, 0, str(self.root), ""],
+        ])
         self.assertIn("save 'demo' --quiet", state["hooks"]["client-detached"])
         self.assertNotIn("attach-session", str(self.calls()))
 
