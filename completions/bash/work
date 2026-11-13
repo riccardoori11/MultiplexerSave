@@ -25,62 +25,20 @@ _work_project_names() (
 )
 
 _work() {
-    local cur="${COMP_WORDS[COMP_CWORD]}" command="${COMP_WORDS[1]-}"
-    local candidate word used i
-    local has_project=0
-    local -a candidates=() options=()
     COMPREPLY=()
-
-    if (( COMP_CWORD == 1 )); then
-        candidates=(init open save kill delete list config doctor help --help --version)
-    else
-        case "$command" in
-            open|save|kill|delete|config)
-                case "$command" in
-                    open) options=(--no-attach --fresh) ;;
-                    save) options=(--quiet) ;;
-                esac
-                for ((i = 2; i < COMP_CWORD; ++i)); do
-                    word=${COMP_WORDS[i]}
-                    case "$command:$word" in
-                        open:--no-attach|open:--fresh|save:--quiet) ;;
-                        *:-*) return 0 ;;
-                        *)
-                            (( has_project == 0 )) || return 0
-                            has_project=1
-                            ;;
-                    esac
-                done
-                for candidate in "${options[@]}"; do
-                    used=0
-                    for ((i = 2; i < COMP_CWORD; ++i)); do
-                        if [[ ${COMP_WORDS[i]} == "$candidate" ]]; then
-                            used=1
-                            break
-                        fi
-                    done
-                    (( used )) || candidates+=("$candidate")
-                done
-                if (( has_project == 0 )) && [[ $cur != -* ]]; then
-                    while IFS= read -r candidate; do
-                        candidates+=("$candidate")
-                    done < <(_work_project_names 2>/dev/null)
-                fi
-                ;;
-            init)
-                if (( COMP_CWORD == 3 )); then
-                    candidates=(--root)
-                elif (( COMP_CWORD == 4 )) && [[ ${COMP_WORDS[3]} == --root ]]; then
-                    compopt -o dirnames 2>/dev/null
-                    return 0
-                fi
-                ;;
+    (( COMP_CWORD >= 2 )) && [[ ${COMP_WORDS[1]-} == open ]] || return 0
+    local cur="${COMP_WORDS[COMP_CWORD]}" candidate i
+    [[ $cur != -* ]] || return 0
+    for ((i = 2; i < COMP_CWORD; ++i)); do
+        case "${COMP_WORDS[i]}" in
+            --no-attach|--fresh) ;;
+            *) return 0 ;;
         esac
-    fi
-
-    for candidate in "${candidates[@]}"; do
-        if [[ $candidate == "$cur"* ]]; then COMPREPLY+=("$candidate"); fi
     done
+    while IFS= read -r candidate; do
+        if [[ $candidate == "$cur"* ]]; then COMPREPLY+=("$candidate"); fi
+    done < <(_work_project_names 2>/dev/null)
     return 0
 }
+# Leave filename fallback disabled, including when no project matches.
 complete -F _work work
