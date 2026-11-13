@@ -182,8 +182,8 @@ std::string project_template(const fs::path& root) {
            "editor_sessions = true\n"
            "# Optional: use resurrect's process matching syntax for additional programs.\n"
            "# resurrect_processes = nvim vim tail\n\n"
-           "[window code]\npane = nvim .\n\n"
-           "[window tools]\npane = git status\n";
+           "[window code]\npane =\n\n"
+           "[window tools]\npane =\n";
 }
 std::string tmuxinator_yaml(const Project& project, const fs::path& config) {
     std::ostringstream out;

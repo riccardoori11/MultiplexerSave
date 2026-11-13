@@ -66,14 +66,12 @@ Choose an existing project directory:
 
 ```bash
 work init demo --root "$HOME/projects/demo"
-nvim "$(work config demo)"
 work open demo
 ```
 
-The generated template opens two tmux windows: `code` starts Neovim and `tools`
-runs `git status`. Each window has one full-screen pane. Switch windows with
-**Ctrl-b, then n** (next) or **Ctrl-b, then p** (previous). Edit the pane commands
-before opening if you use other tools.
+The generated template opens two tmux windows, `code` and `tools`, each with
+one full-screen shell and no startup command. Switch windows with
+**Ctrl-b, then n** (next) or **Ctrl-b, then p** (previous).
 
 Detach with the default tmux shortcut, **Ctrl-b, then d**. Your programs keep
 running, and detaching triggers an asynchronous save. Run `work` to reopen the
@@ -159,10 +157,10 @@ root = /home/user/projects/demo
 editor_sessions = true
 
 [window code]
-pane = nvim .
+pane =
 
 [window tools]
-pane = git status
+pane =
 ```
 
 Global settings go before the first window. Each window needs at least one
