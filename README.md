@@ -62,9 +62,8 @@ cmake --install build-cmake
 
 ### Bash completion
 
-Installation includes a Bash completion script. With `bash-completion` enabled,
-new shells load it automatically from the standard completion directory. To
-enable it in the current shell after the default installation, run:
+Installation includes a Bash completion script. After the default installation,
+run this line in the current shell and add it to `~/.bashrc` for future shells:
 
 ```bash
 source "$HOME/.local/share/bash-completion/completions/work"
@@ -78,14 +77,16 @@ source completions/bash/work
 ```
 
 Type `work open l` and press **Tab** to complete a configured project beginning
-with `l`; press **Tab** twice to list multiple matches. Completion also suggests
-commands, their options, and project names for `save`, `kill`, `delete`, and
-`config`. It reads project filenames directly from the current configuration
-directory, without running `work` or changing project state.
-`work init NAME --root` completes directories.
+with `l`; press **Tab** twice to list multiple matches. Completion applies only
+to the project name after `work open`, including after `--fresh` or `--no-attach`.
+It reads the configured `.work` filenames directly, without running `work` or
+changing project state. Files and folders in the current directory are never
+suggested, including when no project matches. Other commands and flags have no
+completion suggestions.
 
-If your shell does not load completions automatically, add the `source` line to
-`~/.bashrc`. For a custom installation prefix, adjust the path accordingly.
+Explicitly sourcing the script also works when another global completion handler
+overrides Bash's automatic completion loader. For a custom installation prefix,
+adjust the path accordingly.
 
 ## Quick start
 
@@ -294,8 +295,8 @@ project isolation, name selection, locking, command failures, and preservation
 of configuration and snapshots.
 Delete coverage includes argument validation, invalid configurations, dependency
 independence, project isolation, and locking.
-Completion coverage includes project prefixes, command options, configuration
-overrides, and matching projects without external dependencies or state changes.
+Completion coverage includes project prefixes, configuration overrides, and
+interactive Tab presses with unrelated files in the current directory.
 
 For a round trip with real dependencies installed:
 

@@ -5,11 +5,15 @@ import json
 import os
 from pathlib import Path
 import pty
+import select
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import termios
+import time
 import unittest
 
 BINARY = Path(sys.argv.pop(1) if len(sys.argv) > 1 else "build/work").resolve()
@@ -82,7 +86,7 @@ class Integration(unittest.TestCase):
         result = subprocess.run(
             [BASH, "--noprofile", "--norc", "-c", script, "work-completion-test",
              str(COMPLETION), str(len(words) if cword is None else cword), str(binary), *words],
-            env=dict(self.env, **extra), capture_output=True, text=True, timeout=15)
+            env=dict(self.env, **extra), cwd=self.root, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stderr, "")
         return result.stdout.splitlines()
@@ -583,7 +587,7 @@ class Integration(unittest.TestCase):
         (projects / "linked.work").symlink_to(projects / "lab.work")
         for extra in ({}, {"PATH": "", "WORK_RESURRECT_DIR": "/missing/plugin"}):
             with self.subTest(extra=extra):
-                self.assertEqual(self.complete("config", "", **extra),
+                self.assertEqual(self.complete("open", "", **extra),
                                  ["alpha", "lab", "linked", "linux", "zebra"])
         self.assertEqual((projects / "lab.work").read_text(), "invalid configuration\n")
         self.assertFalse(self.state.exists())
@@ -605,42 +609,106 @@ class Integration(unittest.TestCase):
         projects.mkdir(parents=True)
         for name in ("linux", "alpha", "lab"):
             (projects / (name + ".work")).write_text("invalid configuration\n")
-        for command in ("open", "save", "kill", "delete", "config"):
-            with self.subTest(command=command):
-                self.assertEqual(self.complete(command, "l"), ["lab", "linux"])
-                self.assertEqual(self.complete(command, "l", PATH=""), ["lab", "linux"])
-                self.assertEqual(self.complete(command, "l*"), [])
+        (self.root / "local-directory").mkdir()
+        (self.root / "linux-file.txt").write_text("unrelated file\n")
+        self.assertEqual(self.complete("open", "l"), ["lab", "linux"])
+        self.assertEqual(self.complete("open", "l", PATH=""), ["lab", "linux"])
+        self.assertEqual(self.complete("open", "l*"), [])
+        self.assertEqual(self.complete("open", "local"), [])
         self.assertEqual(self.complete("open", "--fresh", "l"), ["lab", "linux"])
         self.assertEqual(self.complete("open", "--no-attach", "l"), ["lab", "linux"])
-        self.assertEqual(self.complete("save", "--quiet", "l"), ["lab", "linux"])
+        self.assertEqual(self.complete("open", "--fresh", "--no-attach", "l"), ["lab", "linux"])
         self.assertEqual(self.complete("open", "l", binary="/missing/work"), ["lab", "linux"])
         self.assertFalse(self.state.exists())
         self.assertEqual(self.calls(), [])
 
-    def test_completion_suggests_commands_and_contextual_options(self):
-        for words, expected in (
-                (("o",), ["open"]),
-                (("--v",), ["--version"]),
-                (("open", "--"), ["--no-attach", "--fresh"]),
-                (("open", "linux", "--f"), ["--fresh"]),
-                (("open", "--fresh", "linux", "--"), ["--no-attach"]),
-                (("open", "--no-attach", "--fresh", "linux", ""), []),
-                (("open", "linux", "l"), []),
-                (("save", "--q"), ["--quiet"]),
-                (("save", "--quiet", "linux", ""), []),
-                (("kill", "--"), []),
-                (("delete", "linux", ""), []),
-                (("config", "linux", ""), []),
-                (("init", ""), []),
-                (("init", "linux", "--r"), ["--root"]),
-                (("list", ""), []),
-                (("doctor", ""), []),
-                (("unknown", ""), []),
-                (("open", "--unknown", ""), [])):
+    def test_completion_only_suggests_project_names_for_open(self):
+        for words in (
+                ("o",), ("--v",), ("open", "--"), ("open", "linux", "--f"),
+                ("open", "--fresh", "linux", "--"), ("open", "linux", "l"),
+                ("open", "--unknown", ""), ("save", "l"), ("save", "--q"),
+                ("kill", "l"), ("delete", "l"), ("config", "l"), ("init", ""),
+                ("init", "linux", "--r"), ("init", "linux", "--root", ""),
+                ("list", ""), ("doctor", ""), ("unknown", "")):
             with self.subTest(words=words):
-                self.assertEqual(self.complete(*words), expected)
-        self.assertEqual(self.complete("open", "--f", "linux", cword=2), ["--fresh"])
+                self.assertEqual(self.complete(*words), [])
         self.assertFalse(self.config.exists())
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_completion_tab_does_not_fall_back_to_local_files(self):
+        self.assertIsNotNone(BASH, "Bash is required for completion tests")
+        projects = self.config / "projects"
+        projects.mkdir(parents=True)
+        (projects / "linux.work").write_text("invalid configuration\n")
+        (self.root / "local-directory").mkdir()
+        (self.root / "open-folder").mkdir()
+        (self.root / "linux-local.txt").write_text("unrelated file\n")
+        rc = self.base / "completion.bashrc"
+        rc.write_text(
+            '_work_test_default() { COMPREPLY=(); }\n'
+            'complete -o bashdefault -o default -F _work_test_default -D\n'
+            'source ' + shlex.quote(str(COMPLETION)) + '\n' + '''
+            bind 'set editing-mode emacs'
+            bind 'set bell-style none'
+            _work_test_capture() {
+                printf '\\nWORK_LINE:%s\\n' "$READLINE_LINE"
+                READLINE_LINE=''
+                READLINE_POINT=0
+            }
+            bind -x '"\\C-x\\C-t":_work_test_capture'
+        ''')
+        env = dict(self.env, PATH="", PS1="WORK_TEST> ", PROMPT_COMMAND="",
+                   TERM="dumb", INPUTRC="/dev/null", HISTFILE="/dev/null")
+        pid, master = pty.fork()
+        if pid == 0:
+            try:
+                os.chdir(self.root)
+                os.execve(BASH, [BASH, "--noprofile", "--rcfile", str(rc), "-i"], env)
+            finally:
+                os._exit(1)
+        pending = b""
+
+        def read_until(marker):
+            nonlocal pending
+            deadline = time.monotonic() + 5
+            while marker not in pending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not select.select([master], [], [], remaining)[0]:
+                    self.fail(f"Timed out waiting for {marker!r}: {pending!r}")
+                chunk = os.read(master, 65536)
+                self.assertTrue(chunk, "Bash exited during completion")
+                pending += chunk
+            output, _, pending = pending.partition(marker)
+            return output
+
+        try:
+            for line, expected in (
+                    ("work open li", "work open linux "),
+                    ("work open --fresh li", "work open --fresh linux "),
+                    ("work open local", "work open local"),
+                    ("work open ./loc", "work open ./loc"),
+                    ("work open linux loc", "work open linux loc"),
+                    ("work open --f", "work open --f"),
+                    ("work o", "work o"),
+                    ("work save li", "work save li"),
+                    ("work init demo --root loc", "work init demo --root loc")):
+                with self.subTest(line=line):
+                    read_until(b"WORK_TEST> ")
+                    deadline = time.monotonic() + 5
+                    while termios.tcgetattr(master)[3] & termios.ICANON:
+                        self.assertLess(time.monotonic(), deadline, "Bash did not enable readline")
+                        time.sleep(0.01)
+                    os.write(master, (line + "\t\x18\x14").encode())
+                    read_until(b"WORK_LINE:")
+                    self.assertEqual(read_until(b"\n").rstrip(b"\r").decode(), expected)
+        finally:
+            os.close(master)
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
         self.assertFalse(self.state.exists())
         self.assertEqual(self.calls(), [])
 
@@ -652,7 +720,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.complete("open", "l", XDG_CONFIG_HOME=str(xdg)), ["local"])
         self.assertEqual(self.complete("open", "l", XDG_CONFIG_HOME=str(xdg),
                                        WORK_CONFIG_HOME=""), ["laptop"])
-        self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME=os.path.relpath(self.config)),
+        self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME=os.path.relpath(self.config, self.root)),
                          ["local"])
         self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME="",
                                        XDG_CONFIG_HOME="relative"), [])
