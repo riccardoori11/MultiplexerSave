@@ -18,6 +18,8 @@ test: build/work
 install: build/work
 	install -d "$(DESTDIR)$(PREFIX)/bin"
 	install -m 755 build/work "$(DESTDIR)$(PREFIX)/bin/work"
+	install -d "$(DESTDIR)$(PREFIX)/share/bash-completion/completions"
+	install -m 644 completions/bash/work "$(DESTDIR)$(PREFIX)/share/bash-completion/completions/work"
 
 clean:
 	rm -rf build

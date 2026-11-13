@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import pty
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,8 @@ import unittest
 
 BINARY = Path(sys.argv.pop(1) if len(sys.argv) > 1 else "build/work").resolve()
 FIXTURE = Path(__file__).with_name("fake_tools.py").resolve()
+COMPLETION = Path(__file__).resolve().parents[1] / "completions/bash/work"
+BASH = shutil.which("bash")
 
 class Integration(unittest.TestCase):
     def setUp(self):
@@ -65,6 +68,24 @@ class Integration(unittest.TestCase):
     def calls(self):
         file = self.fake_state / "calls.jsonl"
         return [json.loads(line) for line in file.read_text().splitlines()] if file.exists() else []
+
+    def complete(self, *words, cword=None, binary=BINARY, **extra):
+        self.assertIsNotNone(BASH, "Bash is required for completion tests")
+        script = '''
+            source "$1" || exit
+            COMP_CWORD=$2
+            shift 2
+            COMP_WORDS=("$@")
+            _work
+            if ((${#COMPREPLY[@]})); then printf '%s\\n' "${COMPREPLY[@]}"; fi
+        '''
+        result = subprocess.run(
+            [BASH, "--noprofile", "--norc", "-c", script, "work-completion-test",
+             str(COMPLETION), str(len(words) if cword is None else cword), str(binary), *words],
+            env=dict(self.env, **extra), capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stderr, "")
+        return result.stdout.splitlines()
 
     def test_init_and_config(self):
         self.init()
@@ -252,12 +273,14 @@ class Integration(unittest.TestCase):
         self.start(code=1)
         self.assertEqual(self.calls(), [])
 
-    def test_new_workspace_is_generated_and_detached(self):
+    def test_new_workspace_has_two_unsplit_shell_windows_and_is_detached(self):
         self.init()
         self.assertIn("Created workspace", self.start())
         state = json.loads((self.fake_state / "work-demo.json").read_text())
-        self.assertEqual(len(state["panes"]), 4)
-        self.assertEqual(state["panes"][0][3], str(self.root))
+        self.assertEqual(state["panes"], [
+            ["demo", 0, 0, str(self.root), ""],
+            ["demo", 1, 0, str(self.root), ""],
+        ])
         self.assertIn("save 'demo' --quiet", state["hooks"]["client-detached"])
         self.assertNotIn("attach-session", str(self.calls()))
 
@@ -545,6 +568,95 @@ class Integration(unittest.TestCase):
         self.call("save", "demo")
         self.kill()
         self.assertIn("saved", self.call("list"))
+
+    def test_completion_ignores_unusable_project_entries(self):
+        projects = self.config / "projects"
+        projects.mkdir(parents=True)
+        for name in ("zebra", "linux", "alpha", "lab"):
+            (projects / (name + ".work")).write_text("invalid configuration\n")
+        for name in ("-bad", "two words", "a.b", "a" * 49, "line\nbreak"):
+            (projects / (name + ".work")).write_text("ignored\n")
+        (projects / "directory.work").mkdir()
+        (projects / "unrelated.txt").write_text("ignored\n")
+        (projects / "uppercase.WORK").write_text("ignored\n")
+        (projects / "broken.work").symlink_to(projects / "missing.work")
+        (projects / "linked.work").symlink_to(projects / "lab.work")
+        for extra in ({}, {"PATH": "", "WORK_RESURRECT_DIR": "/missing/plugin"}):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.complete("config", "", **extra),
+                                 ["alpha", "lab", "linked", "linux", "zebra"])
+        self.assertEqual((projects / "lab.work").read_text(), "invalid configuration\n")
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_completion_handles_missing_or_empty_configuration(self):
+        for create_directory in (False, True):
+            with self.subTest(create_directory=create_directory):
+                if create_directory:
+                    (self.config / "projects").mkdir(parents=True)
+                self.assertEqual(self.complete("open", "l", PATH=""), [])
+                self.assertEqual(self.complete("open", "missing", PATH=""), [])
+                self.assertEqual(self.config.exists(), create_directory)
+                self.assertFalse(self.state.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_completion_matches_projects_without_dependencies_or_state_changes(self):
+        projects = self.config / "projects"
+        projects.mkdir(parents=True)
+        for name in ("linux", "alpha", "lab"):
+            (projects / (name + ".work")).write_text("invalid configuration\n")
+        for command in ("open", "save", "kill", "delete", "config"):
+            with self.subTest(command=command):
+                self.assertEqual(self.complete(command, "l"), ["lab", "linux"])
+                self.assertEqual(self.complete(command, "l", PATH=""), ["lab", "linux"])
+                self.assertEqual(self.complete(command, "l*"), [])
+        self.assertEqual(self.complete("open", "--fresh", "l"), ["lab", "linux"])
+        self.assertEqual(self.complete("open", "--no-attach", "l"), ["lab", "linux"])
+        self.assertEqual(self.complete("save", "--quiet", "l"), ["lab", "linux"])
+        self.assertEqual(self.complete("open", "l", binary="/missing/work"), ["lab", "linux"])
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_completion_suggests_commands_and_contextual_options(self):
+        for words, expected in (
+                (("o",), ["open"]),
+                (("--v",), ["--version"]),
+                (("open", "--"), ["--no-attach", "--fresh"]),
+                (("open", "linux", "--f"), ["--fresh"]),
+                (("open", "--fresh", "linux", "--"), ["--no-attach"]),
+                (("open", "--no-attach", "--fresh", "linux", ""), []),
+                (("open", "linux", "l"), []),
+                (("save", "--q"), ["--quiet"]),
+                (("save", "--quiet", "linux", ""), []),
+                (("kill", "--"), []),
+                (("delete", "linux", ""), []),
+                (("config", "linux", ""), []),
+                (("init", ""), []),
+                (("init", "linux", "--r"), ["--root"]),
+                (("list", ""), []),
+                (("doctor", ""), []),
+                (("unknown", ""), []),
+                (("open", "--unknown", ""), [])):
+            with self.subTest(words=words):
+                self.assertEqual(self.complete(*words), expected)
+        self.assertEqual(self.complete("open", "--f", "linux", cword=2), ["--fresh"])
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_completion_respects_configuration_overrides_and_silences_errors(self):
+        self.init("local")
+        xdg = self.base / "xdg config [*] with spaces"
+        (xdg / "work/projects").mkdir(parents=True)
+        (xdg / "work/projects/laptop.work").write_text("invalid configuration\n")
+        self.assertEqual(self.complete("open", "l", XDG_CONFIG_HOME=str(xdg)), ["local"])
+        self.assertEqual(self.complete("open", "l", XDG_CONFIG_HOME=str(xdg),
+                                       WORK_CONFIG_HOME=""), ["laptop"])
+        self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME=os.path.relpath(self.config)),
+                         ["local"])
+        self.assertEqual(self.complete("open", "l", WORK_CONFIG_HOME="",
+                                       XDG_CONFIG_HOME="relative"), [])
+        self.assertEqual(self.calls(), [])
 
     def test_doctor_and_no_previous_project(self):
         self.assertIn("OK", self.call("doctor"))

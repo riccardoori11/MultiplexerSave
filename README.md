@@ -60,18 +60,45 @@ ctest --test-dir build-cmake --output-on-failure
 cmake --install build-cmake
 ```
 
+### Bash completion
+
+Installation includes a Bash completion script. With `bash-completion` enabled,
+new shells load it automatically from the standard completion directory. To
+enable it in the current shell after the default installation, run:
+
+```bash
+source "$HOME/.local/share/bash-completion/completions/work"
+```
+
+You can also try it directly from the repository after building:
+
+```bash
+export PATH="$PWD/build:$PATH"
+source completions/bash/work
+```
+
+Type `work open l` and press **Tab** to complete a configured project beginning
+with `l`; press **Tab** twice to list multiple matches. Completion also suggests
+commands, their options, and project names for `save`, `kill`, `delete`, and
+`config`. It reads project filenames directly from the current configuration
+directory, without running `work` or changing project state.
+`work init NAME --root` completes directories.
+
+If your shell does not load completions automatically, add the `source` line to
+`~/.bashrc`. For a custom installation prefix, adjust the path accordingly.
+
 ## Quick start
 
 Choose an existing project directory:
 
 ```bash
 work init demo --root "$HOME/projects/demo"
-nvim "$(work config demo)"
 work open demo
 ```
 
-The generated template starts Neovim, runs `git status`, and opens two additional
-shell panes. Edit the pane commands before opening if you use other tools.
+The generated template opens two tmux windows, `code` and `tools`, each with
+one full-screen shell and no startup command. Switch windows with
+**Ctrl-b, then n** (next) or **Ctrl-b, then p** (previous).
 
 Detach with the default tmux shortcut, **Ctrl-b, then d**. Your programs keep
 running, and detaching triggers an asynchronous save. Run `work` to reopen the
@@ -157,19 +184,17 @@ root = /home/user/projects/demo
 editor_sessions = true
 
 [window code]
-layout = main-vertical
-pane = nvim .
 pane =
 
 [window tools]
-layout = even-horizontal
-pane = git status
 pane =
 ```
 
 Global settings go before the first window. Each window needs at least one
-`pane` line; a blank value opens a shell. Commands are sent to the pane's shell
-and may contain normal shell quoting, variables, pipelines, and scripts.
+`pane` line; a blank value opens a shell. One `pane` line gives the window a
+full-screen terminal. Add more `pane` lines to split it, and set `layout` to
+control how those panes are arranged. Commands are sent to the pane's shell and
+may contain normal shell quoting, variables, pipelines, and scripts.
 
 | Setting | Meaning |
 | --- | --- |
@@ -269,6 +294,8 @@ project isolation, name selection, locking, command failures, and preservation
 of configuration and snapshots.
 Delete coverage includes argument validation, invalid configurations, dependency
 independence, project isolation, and locking.
+Completion coverage includes project prefixes, command options, configuration
+overrides, and matching projects without external dependencies or state changes.
 
 For a round trip with real dependencies installed:
 
