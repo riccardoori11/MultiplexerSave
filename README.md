@@ -10,7 +10,6 @@ its configured windows and panes.
 - Linux and a C++20 compiler.
 - Make, or CMake 3.20 or newer.
 - tmux, tmuxinator, Bash, and a tmux-resurrect checkout at runtime.
-- Python 3 for the integration tests.
 
 Pane applications such as Neovim and Git must be installed separately.
 
@@ -19,7 +18,7 @@ Pane applications such as Neovim and Git must be installed separately.
 ### Fedora dependencies
 
 ```bash
-sudo dnf install gcc-c++ make tmux ruby rubygems git python3
+sudo dnf install gcc-c++ make tmux ruby rubygems git
 gem install --user-install tmuxinator
 git clone https://github.com/tmux-plugins/tmux-resurrect \
   ~/.tmux/plugins/tmux-resurrect
@@ -42,7 +41,6 @@ Run from the repository directory:
 
 ```bash
 make -j
-make test
 make install
 work doctor
 ```
@@ -284,30 +282,11 @@ Grouped tmux sessions are unsupported.
 
 ```bash
 make -j
-make test
 ```
 
-The integration tests use controlled external tools and temporary directories.
-They cover project isolation, concurrent opening, save/restore failures,
-malformed snapshots, detach saves, invalid or missing configuration, and a
-7,000-pane save/restore with listings larger than 64 KiB. Kill coverage includes
-project isolation, name selection, locking, command failures, and preservation
-of configuration and snapshots.
-Delete coverage includes argument validation, invalid configurations, dependency
-independence, project isolation, and locking.
-Completion coverage includes project prefixes, configuration overrides, and
-interactive Tab presses with unrelated files in the current directory.
-
-For a round trip with real dependencies installed:
-
-```bash
-python3 tests/live_smoke.py ./build/work
-```
-
-The live test creates an isolated project, adds a pane, saves, uses `work kill`
-to stop its own server, restores, and compares directories, pane structure,
-layouts, and active selections. See [VALIDATION.md](VALIDATION.md) for recorded
-results and remaining editor, desktop, and upstream-version testing gaps.
+The repository no longer contains a test suite. The former Python integration
+and live smoke tests remain in git history at commit `1e2336f`. See [VALIDATION.md](VALIDATION.md) for recorded results
+and remaining editor, desktop, and upstream-version testing gaps.
 
 | File | Responsibility |
 | --- | --- |
@@ -315,8 +294,6 @@ results and remaining editor, desktop, and upstream-version testing gaps.
 | `src/project.cpp` | Configuration parsing, YAML generation, atomic writes |
 | `src/process.cpp` | Subprocess execution, output capture, child handling |
 | `include/work/` | C++ interfaces |
-| `tests/integration.py` | Integration tests with controlled dependencies |
-| `tests/live_smoke.py` | Real dependency smoke test |
 
 Project operations use per-project locks; configuration and text-state writes
 use temporary files and atomic renames. Subprocesses receive argument vectors
