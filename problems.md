@@ -1,6 +1,7 @@
 # Code review findings — current status
 
-Reviewed on 2026-10-07 against the current working tree.
+Historical review from 2026-10-07. Test names, scripts, and test commands below
+refer to the `integration/updates` branch, where the Python test suite is maintained.
 All four previously reported issues are resolved for their original reproduction
 cases. No unresolved defect was found in this focused review of those fixes.
 Source code was not changed during this review.

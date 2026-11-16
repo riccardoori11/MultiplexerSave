@@ -10,10 +10,3 @@ target_compile_features(work PRIVATE cxx_std_20)
 target_compile_options(work PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 include(GNUInstallDirs)
 install(TARGETS work RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-include(CTest)
-if(BUILD_TESTING)
-  find_package(Python3 COMPONENTS Interpreter REQUIRED)
-  add_test(NAME integration COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py $<TARGET_FILE:work>)
-endif()

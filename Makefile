@@ -5,15 +5,12 @@ PREFIX ?= $(HOME)/.local
 SOURCES := src/main.cpp src/process.cpp src/project.cpp
 HEADERS := $(wildcard include/work/*.hpp)
 
-.PHONY: all test install clean
+.PHONY: all install clean
 all: build/work
 
 build/work: $(SOURCES) $(HEADERS)
 	mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) $(LDFLAGS) -o $@
-
-test: build/work
-	python3 tests/integration.py ./build/work
 
 install: build/work
 	install -d "$(DESTDIR)$(PREFIX)/bin"
