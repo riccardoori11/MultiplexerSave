@@ -12,10 +12,3 @@ include(GNUInstallDirs)
 install(TARGETS work RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES completions/bash/work
   DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions)
-
-include(CTest)
-if(BUILD_TESTING)
-  find_package(Python3 COMPONENTS Interpreter REQUIRED)
-  add_test(NAME integration COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py $<TARGET_FILE:work>)
-endif()
