@@ -284,10 +284,8 @@ Grouped tmux sessions are unsupported.
 make -j
 ```
 
-The Python integration tests and the live smoke test are maintained on the
-`integration/updates` branch. To run them, use a checkout of that branch and
-run `make test`, or `python3 tests/live_smoke.py ./build/work` with the real
-dependencies installed. See [VALIDATION.md](VALIDATION.md) for recorded results
+The repository no longer contains a test suite. The former Python integration
+and live smoke tests remain in git history at commit `1e2336f`. See [VALIDATION.md](VALIDATION.md) for recorded results
 and remaining editor, desktop, and upstream-version testing gaps.
 
 | File | Responsibility |
