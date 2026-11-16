@@ -24,20 +24,75 @@ _work_project_names() (
     done
 )
 
+_work_add_matches() {
+    # Usage: _work_add_matches CUR WORD...; appends WORDs starting with CUR.
+    local cur=$1 word
+    shift
+    for word in "$@"; do
+        if [[ $word == "$cur"* ]]; then COMPREPLY+=("$word"); fi
+    done
+}
+
 _work() {
     COMPREPLY=()
-    (( COMP_CWORD >= 2 )) && [[ ${COMP_WORDS[1]-} == open ]] || return 0
-    local cur="${COMP_WORDS[COMP_CWORD]}" candidate i
-    [[ $cur != -* ]] || return 0
+    local cur="${COMP_WORDS[COMP_CWORD]-}" command="${COMP_WORDS[1]-}"
+    local word candidate i have_name=0
+    local -a options=() unused=() names=()
+
+    if (( COMP_CWORD == 1 )); then
+        if [[ $cur == -* ]]; then
+            _work_add_matches "$cur" --help --version
+        else
+            _work_add_matches "$cur" open save kill init delete list config doctor help
+        fi
+        return 0
+    fi
+
+    case "$command" in
+        open) options=(--no-attach --fresh) ;;
+        save) options=(--quiet) ;;
+        kill) ;;
+        delete|config)
+            # Exactly one project name.
+            (( COMP_CWORD == 2 )) && [[ $cur != -* ]] || return 0
+            while IFS= read -r candidate; do names+=("$candidate"); done \
+                < <(_work_project_names 2>/dev/null)
+            _work_add_matches "$cur" "${names[@]}"
+            return 0
+            ;;
+        init)
+            # work init NAME [--root DIRECTORY]; NAME is new, so nothing to suggest.
+            if (( COMP_CWORD == 3 )); then
+                _work_add_matches "$cur" --root
+            elif (( COMP_CWORD == 4 )) && [[ ${COMP_WORDS[3]-} == --root ]]; then
+                compopt -o filenames 2>/dev/null
+                while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done \
+                    < <(compgen -d -- "$cur")
+            fi
+            return 0
+            ;;
+        *) return 0 ;;
+    esac
+
+    # open, save and kill: one optional project name plus their options, in any order.
     for ((i = 2; i < COMP_CWORD; ++i)); do
-        case "${COMP_WORDS[i]}" in
-            --no-attach|--fresh) ;;
-            *) return 0 ;;
-        esac
+        word=${COMP_WORDS[i]}
+        [[ $word == -* ]] || have_name=1
     done
-    while IFS= read -r candidate; do
-        if [[ $candidate == "$cur"* ]]; then COMPREPLY+=("$candidate"); fi
-    done < <(_work_project_names 2>/dev/null)
+    for word in "${options[@]}"; do
+        for ((i = 2; i < COMP_CWORD; ++i)); do
+            [[ ${COMP_WORDS[i]} == "$word" ]] && continue 2
+        done
+        unused+=("$word")
+    done
+
+    if [[ $cur == -* ]] || (( have_name )); then
+        _work_add_matches "$cur" "${unused[@]}"
+    else
+        while IFS= read -r candidate; do names+=("$candidate"); done \
+            < <(_work_project_names 2>/dev/null)
+        _work_add_matches "$cur" "${names[@]}"
+    fi
     return 0
 }
 # Leave filename fallback disabled, including when no project matches.
