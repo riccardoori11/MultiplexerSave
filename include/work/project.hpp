@@ -27,6 +27,7 @@ struct Paths {
     static Paths from_environment();
 };
 std::string trim(std::string text);
+bool is_valid_name(const std::string& name);
 void validate_name(const std::string& name);
 fs::path existing_project_file(const Paths& paths, const std::string& name);
 Project read_project(const Paths& paths, const std::string& name);

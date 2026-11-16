@@ -21,6 +21,7 @@
 
 namespace work {
 namespace {
+constexpr const char* version = "0.1.0";
 class ProjectLock {
 public:
     ProjectLock(const Paths& paths, const std::string& name) {
@@ -391,12 +392,15 @@ void list_projects(const Paths& paths) {
     const auto dir = paths.config / "projects";
     if (!fs::is_directory(dir)) { std::cout << "No projects. Create one with work init NAME --root DIRECTORY\n"; return; }
     std::vector<std::string> names;
-    for (const auto& entry : fs::directory_iterator(dir))
-        if (entry.is_regular_file() && entry.path().extension() == ".work") names.push_back(entry.path().stem().string());
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".work") continue;
+        auto name = entry.path().stem().string();
+        if (is_valid_name(name)) names.push_back(std::move(name));
+        else std::cerr << "work: Skipping " << entry.path().string() << ": invalid project name\n";
+    }
     std::sort(names.begin(), names.end());
     const bool has_tmux = executable("tmux").has_value();
     for (const auto& name : names) {
-        validate_name(name);
         const bool active = has_tmux && running(name);
         const bool snapshot = fs::is_regular_file(paths.snapshots(name) / "last");
         std::cout << name << "\t" << (active ? "running" : snapshot ? "saved" : "configured");
@@ -423,16 +427,19 @@ int doctor(const Paths& paths) {
 }
 void help() {
     std::cout <<
-        "work 0.1.0 — project workspaces powered by tmuxinator + tmux-resurrect\n\n"
+        "work " << version << " — project workspaces powered by tmuxinator + tmux-resurrect\n\n"
         "  work                              Open the most recent project\n"
         "  work init NAME [--root DIRECTORY] Create a project configuration\n"
         "  work open [NAME] [--no-attach] [--fresh]\n"
+        "                                    Reconnect, restore, or create, then attach\n"
         "  work save [NAME] [--quiet]        Save a running project\n"
         "  work kill [NAME]                  Stop a project server without saving\n"
         "  work delete NAME                  Delete a saved project configuration\n"
-        "  work list                        List projects and their state\n"
-        "  work config NAME                 Print the editable configuration path\n"
-        "  work doctor                      Check dependencies\n\n"
+        "  work list                         List projects and their state\n"
+        "  work config NAME                  Print the editable configuration path\n"
+        "  work doctor                       Check dependencies\n"
+        "  work --help                       Show this help\n"
+        "  work --version                    Show the version\n\n"
         "Each project uses its own tmux server. Detaching automatically saves it.\n"
         "--fresh uses the project configuration when no project server is running.\n";
 }
@@ -440,7 +447,7 @@ void help() {
 int main_impl(int argc, char** argv) {
     ::umask(0077);
     if (argc > 1 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "help")) { help(); return 0; }
-    if (argc > 1 && std::string(argv[1]) == "--version") { std::cout << "work 0.1.0\n"; return 0; }
+    if (argc > 1 && std::string(argv[1]) == "--version") { std::cout << "work " << version << "\n"; return 0; }
     const Paths paths = Paths::from_environment();
     const std::string command = argc > 1 ? argv[1] : "open";
     if (command == "doctor" || command == "list") {
@@ -458,9 +465,7 @@ int main_impl(int argc, char** argv) {
         return 0;
     }
     if (command == "init") {
-        if (argc < 3){
-				throw std::runtime_error("Usage: work init NAME [--root DIRECTORY]");
-		}
+        if (argc < 3) throw std::runtime_error("Usage: work init NAME [--root DIRECTORY]");
         const std::string name(argv[2]);
         validate_name(name);
         fs::path root = fs::current_path();

@@ -48,11 +48,14 @@ std::string trim(std::string text) {
     const auto last = text.find_last_not_of(" \t\r\n");
     return text.substr(first, last - first + 1);
 }
+bool is_valid_name(const std::string& name) {
+    return !name.empty() && name.size() <= 48 &&
+        ((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') ||
+         (name[0] >= '0' && name[0] <= '9')) &&
+        std::all_of(name.begin(), name.end(), identifier_char);
+}
 void validate_name(const std::string& name) {
-    if (name.empty() || name.size() > 48 ||
-        !((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') ||
-          (name[0] >= '0' && name[0] <= '9')) ||
-        !std::all_of(name.begin(), name.end(), identifier_char))
+    if (!is_valid_name(name))
         throw std::runtime_error("Project names must be 1–48 letters, digits, underscores or hyphens, starting with a letter or digit.");
 }
 Paths Paths::from_environment() {
