@@ -14,9 +14,9 @@ its configured windows and panes.
 
 ## Development and testing
 
-The application is implemented in C++20. Python is used only by the test tools,
-which are maintained on the `integration/updates` branch. The `master` branch
-contains the application without the Python test suite or test build targets.
+The application is implemented in C++20. The repository no longer contains a
+test suite or test build targets. The former Python integration and live smoke
+tests remain in git history at commit `1e2336f`.
 
 Build with `make -j`, or use CMake:
 
@@ -24,7 +24,3 @@ Build with `make -j`, or use CMake:
 cmake -S . -B build-cmake
 cmake --build build-cmake
 ```
-
-To run integration tests, use a checkout of `integration/updates` and run
-`make test`. That branch also includes `tests/live_smoke.py` for testing with
-real tmux dependencies.

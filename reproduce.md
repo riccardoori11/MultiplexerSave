@@ -1,8 +1,8 @@
 # Historical failure reproductions
 
-The Python reproduction scripts and their test fixtures are maintained on the
-`integration/updates` branch. Use that branch to read the full reproduction
-instructions and run `make test` to check the fixed behavior.
+The Python reproduction scripts and test fixtures have been removed from the
+repository. The full reproduction instructions and tests remain in git history
+at commit `1e2336f`; read them with `git show 1e2336f:reproduce.md`.
 
 The original scripts assert behavior from before the fixes and are expected to
 fail after those fixes. [problems.md](problems.md) records the historical review

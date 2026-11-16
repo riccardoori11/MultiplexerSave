@@ -1,7 +1,8 @@
 # Code review findings — current status
 
 Historical review from 2026-10-07. Test names, scripts, and test commands below
-refer to the `integration/updates` branch, where the Python test suite is maintained.
+refer to the Python test suite, which has since been removed from the repository.
+It remains in git history at commit `1e2336f`.
 All four previously reported issues are resolved for their original reproduction
 cases. No unresolved defect was found in this focused review of those fixes.
 Source code was not changed during this review.
@@ -81,4 +82,4 @@ also remains unchanged after restoration.
   versions remain unverified here.
 - [reproduce.md](reproduce.md) preserves the original failure scenarios. Its
   script asserts the old behavior and is expected to fail after these fixes;
-  use `make test` to validate the current behavior.
+  the former test suite at commit `1e2336f` validated the fixed behavior.
