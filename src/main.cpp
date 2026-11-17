@@ -53,7 +53,7 @@ ProcessResult tmux(const std::string& name, std::vector<std::string> args,
     return run(tmux_args(name, std::move(args)), capture, clean_tmux);
 }
 void require_executable(const std::string& name) {
-    if (!executable(name)) throw std::runtime_error("Missing dependency: " + name + ". Run work doctor for setup instructions.");
+    if (!executable(name)) throw std::runtime_error("Missing dependency: " + name + ". Install it and make sure it is on PATH.");
 }
 void check(const ProcessResult& result, const std::string& context) {
     if (result.exit_code != 0)
@@ -469,23 +469,6 @@ void list_projects(const Paths& paths) {
         std::cout << "\n";
     }
 }
-int doctor(const Paths& paths) {
-    bool okay = true;
-    for (const auto& name : {"tmux", "tmuxinator", "bash"}) {
-        const auto found = executable(name);
-        std::cout << (found ? "OK      " : "MISSING ") << name;
-        if (found) std::cout << " — " << *found;
-        std::cout << "\n";
-        okay = okay && found.has_value();
-    }
-    const auto plugin = plugin_directory();
-    std::cout << (plugin ? "OK      " : "MISSING ") << "tmux-resurrect";
-    if (plugin) std::cout << " — " << plugin->string();
-    std::cout << "\nConfig: " << paths.config.string() << "\nState:  " << paths.state.string() << "\n";
-    if (!okay || !plugin)
-        std::cout << "Install tmux, tmuxinator and tmux-resurrect; see README.md for Fedora instructions.\n";
-    return okay && plugin ? 0 : 1;
-}
 void help() {
     std::cout <<
         "work " << version << " — project workspaces powered by tmuxinator + tmux-resurrect\n\n"
@@ -499,7 +482,6 @@ void help() {
         "  work delete NAME                  Delete a saved project configuration\n"
         "  work list                         List projects and their state\n"
         "  work config NAME                  Print the editable configuration path\n"
-        "  work doctor                       Check dependencies\n"
         "  work --help                       Show this help\n"
         "  work --version                    Show the version\n\n"
         "Each project uses its own tmux server. Detaching automatically saves it.\n"
@@ -512,9 +494,8 @@ int main_impl(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--version") { std::cout << "work " << version << "\n"; return 0; }
     const Paths paths = Paths::from_environment();
     const std::string command = argc > 1 ? argv[1] : "open";
-    if (command == "doctor" || command == "list") {
-        if (argc > 2) throw std::runtime_error("Unexpected arguments for work " + command);
-        if (command == "doctor") return doctor(paths);
+    if (command == "list") {
+        if (argc > 2) throw std::runtime_error("Unexpected arguments for work list");
         list_projects(paths); return 0;
     }
     if (command == "config") {

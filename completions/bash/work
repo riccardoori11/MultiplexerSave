@@ -43,7 +43,7 @@ _work() {
         if [[ $cur == -* ]]; then
             _work_add_matches "$cur" --help --version
         else
-            _work_add_matches "$cur" open save kill init delete list config doctor help
+            _work_add_matches "$cur" open save kill init delete list config help
         fi
         return 0
     fi
