@@ -36,7 +36,7 @@ _work_add_matches() {
 _work() {
     COMPREPLY=()
     local cur="${COMP_WORDS[COMP_CWORD]-}" command="${COMP_WORDS[1]-}"
-    local word candidate i have_name=0
+    local word candidate i have_name=0 have_all=0
     local -a options=() unused=() names=()
 
     if (( COMP_CWORD == 1 )); then
@@ -50,7 +50,7 @@ _work() {
 
     case "$command" in
         open) options=(--no-attach --fresh) ;;
-        save) options=(--quiet) ;;
+        save) options=(--quiet --all) ;;
         kill) ;;
         delete|config)
             # Exactly one project name.
@@ -78,15 +78,18 @@ _work() {
     for ((i = 2; i < COMP_CWORD; ++i)); do
         word=${COMP_WORDS[i]}
         [[ $word == -* ]] || have_name=1
+        [[ $word == --all ]] && have_all=1
     done
     for word in "${options[@]}"; do
         for ((i = 2; i < COMP_CWORD; ++i)); do
             [[ ${COMP_WORDS[i]} == "$word" ]] && continue 2
         done
+        # --all replaces the project name, so it can't follow one.
+        [[ $word == --all ]] && (( have_name )) && continue
         unused+=("$word")
     done
 
-    if [[ $cur == -* ]] || (( have_name )); then
+    if [[ $cur == -* ]] || (( have_name || have_all )); then
         _work_add_matches "$cur" "${unused[@]}"
     else
         while IFS= read -r candidate; do names+=("$candidate"); done \

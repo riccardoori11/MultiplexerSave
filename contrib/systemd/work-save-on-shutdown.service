@@ -1,0 +1,13 @@
+[Unit]
+Description=Save running work projects when the user session stops
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# Best effort: tmux servers may already be stopping at the same time.
+ExecStop=%h/.local/bin/work save --all --quiet
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

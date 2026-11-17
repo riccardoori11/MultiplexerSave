@@ -388,17 +388,42 @@ void open_project(const Paths& paths, const std::string& name, bool no_attach, b
         check(tmux(name, {"attach-session"}, OutputCapture::inherit), "Attaching failed");
     }
 }
-void list_projects(const Paths& paths) {
-    const auto dir = paths.config / "projects";
-    if (!fs::is_directory(dir)) { std::cout << "No projects. Create one with work init NAME --root DIRECTORY\n"; return; }
+// Configured project names in sorted order. Files with invalid names are skipped,
+// with a warning unless `warn` is false.
+std::vector<std::string> configured_projects(const Paths& paths, bool warn) {
     std::vector<std::string> names;
+    const auto dir = paths.config / "projects";
+    if (!fs::is_directory(dir)) return names;
     for (const auto& entry : fs::directory_iterator(dir)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".work") continue;
         auto name = entry.path().stem().string();
         if (is_valid_name(name)) names.push_back(std::move(name));
-        else std::cerr << "work: Skipping " << entry.path().string() << ": invalid project name\n";
+        else if (warn) std::cerr << "work: Skipping " << entry.path().string() << ": invalid project name\n";
     }
     std::sort(names.begin(), names.end());
+    return names;
+}
+// Saves every running project. A failure in one project does not stop the
+// others; returns 1 if any save failed.
+int save_all_projects(const Paths& paths, bool quiet) {
+    require_executable("tmux");
+    int saved = 0, failed = 0;
+    for (const auto& name : configured_projects(paths, !quiet)) {
+        if (!running(name)) continue;
+        try {
+            save_project(paths, name, quiet);
+            ++saved;
+        } catch (const std::exception& error) {
+            std::cerr << "work: " << name << ": " << error.what() << "\n";
+            ++failed;
+        }
+    }
+    if (!quiet && saved == 0 && failed == 0) std::cout << "No running projects.\n";
+    return failed == 0 ? 0 : 1;
+}
+void list_projects(const Paths& paths) {
+    if (!fs::is_directory(paths.config / "projects")) { std::cout << "No projects. Create one with work init NAME --root DIRECTORY\n"; return; }
+    const auto names = configured_projects(paths, true);
     const bool has_tmux = executable("tmux").has_value();
     for (const auto& name : names) {
         const bool active = has_tmux && running(name);
@@ -433,6 +458,7 @@ void help() {
         "  work open [NAME] [--no-attach] [--fresh]\n"
         "                                    Reconnect, restore, or create, then attach\n"
         "  work save [NAME] [--quiet]        Save a running project\n"
+        "  work save --all [--quiet]         Save every running project\n"
         "  work kill [NAME]                  Stop a project server without saving\n"
         "  work delete NAME                  Delete a saved project configuration\n"
         "  work list                         List projects and their state\n"
@@ -486,15 +512,20 @@ int main_impl(int argc, char** argv) {
     }
     if (command == "open" || command == "save" || command == "kill") {
         std::optional<std::string> name;
-        bool no_attach = false, fresh = false, quiet = false;
+        bool no_attach = false, fresh = false, quiet = false, all = false;
         for (int i = 2; i < argc; ++i) {
             const std::string arg(argv[i]);
             if (arg == "--no-attach" && command == "open") no_attach = true;
             else if (arg == "--fresh" && command == "open") fresh = true;
             else if (arg == "--quiet" && command == "save") quiet = true;
+            else if (arg == "--all" && command == "save") all = true;
             else if (arg.starts_with("-")) throw std::runtime_error("Unknown option: " + arg);
             else if (!name) name = arg;
             else throw std::runtime_error("Unexpected argument: " + arg);
+        }
+        if (all) {
+            if (name) throw std::runtime_error("Use either a project name or --all, not both.");
+            return save_all_projects(paths, quiet);
         }
         if (!name) name = current_project(paths);
         validate_name(*name);

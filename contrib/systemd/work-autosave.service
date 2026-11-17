@@ -1,0 +1,6 @@
+[Unit]
+Description=Save running work projects
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/work save --all --quiet
