@@ -260,24 +260,48 @@ void save_project(const Paths& paths, const std::string& name, bool quiet) {
     const bool previous_file = fs::is_regular_file(last);
     const auto previous_path = previous_file ? fs::canonical(last) : fs::path{};
     const auto previous_content = previous_file ? read_file(last) : std::string{};
-    const std::string hook_option = "@resurrect-hook-post-save-all";
-    const auto old_hook_result = tmux(name, {"show-option", "-gqv", hook_option}, OutputCapture::complete);
-    check(old_hook_result, "Cannot inspect save completion hook");
-    const auto old_hook = trim(old_hook_result.output);
-    const auto marker = paths.project_state(name) / ("save-completed-" + std::to_string(::getpid()));
-    std::error_code ignored;
-    fs::remove(marker, ignored);
-    const auto completion = "printf done > " + shell_quote(marker.string());
-    const auto hook = old_hook.empty() ? completion : "( " + old_hook + "\n) &&\n" + completion;
-    tmux_check(name, {"set-option", "-g", hook_option, hook}, "Cannot configure save completion check");
-    const auto reset_hook = [&] {
-        try {
-            if (old_hook.empty()) (void)tmux(name, {"set-option", "-gu", hook_option});
-            else (void)tmux(name, {"set-option", "-g", hook_option, old_hook});
-        } catch (...) { /* Best-effort cleanup if the server exited meanwhile. */ }
-        std::error_code remove_error;
-        fs::remove(marker, remove_error);
+    const auto read_hook = [&](const std::string& option) {
+        const auto result = tmux(name, {"show-option", "-gqv", option}, OutputCapture::complete);
+        check(result, "Cannot inspect save hooks");
+        return trim(result.output);
     };
+    // Resurrect runs each hook as `HOOK ARGS...`. The post-save-all hook marks
+    // that saving finished. The post-save-layout hook receives the newly written
+    // snapshot before resurrect drops it as a duplicate, so its marker proves a
+    // snapshot was written even when `last` is unchanged.
+    const std::string completion_option = "@resurrect-hook-post-save-all";
+    const std::string layout_option = "@resurrect-hook-post-save-layout";
+    const auto old_completion_hook = read_hook(completion_option);
+    const auto old_layout_hook = read_hook(layout_option);
+    const auto marker_prefix = "save-" + std::to_string(::getpid());
+    const auto marker = paths.project_state(name) / (marker_prefix + "-completed");
+    const auto layout_marker = paths.project_state(name) / (marker_prefix + "-written");
+    const auto remove_markers = [&] {
+        std::error_code ignored;
+        fs::remove(marker, ignored);
+        fs::remove(layout_marker, ignored);
+    };
+    remove_markers();
+    const auto completion = "printf done > " + shell_quote(marker.string());
+    const auto completion_hook = old_completion_hook.empty() ? completion
+        : "( " + old_completion_hook + "\n) &&\n" + completion;
+    const auto layout_hook = "_work_layout_written() { test -s \"$1\" && printf done > " +
+        shell_quote(layout_marker.string()) + (old_layout_hook.empty() ? "" : "; " + old_layout_hook + " \"$@\"") +
+        "; }; _work_layout_written";
+    const auto reset_hooks = [&] {
+        for (const auto& [option, old_hook] : {std::pair{completion_option, old_completion_hook},
+                                               std::pair{layout_option, old_layout_hook}}) {
+            try {
+                if (old_hook.empty()) (void)tmux(name, {"set-option", "-gu", option});
+                else (void)tmux(name, {"set-option", "-g", option, old_hook});
+            } catch (...) { /* Best-effort cleanup if the server exited meanwhile. */ }
+        }
+        remove_markers();
+    };
+    try {
+        tmux_check(name, {"set-option", "-g", completion_option, completion_hook}, "Cannot configure save completion check");
+        tmux_check(name, {"set-option", "-g", layout_option, layout_hook}, "Cannot configure snapshot write check");
+    } catch (...) { reset_hooks(); throw; }
     try {
         // Upstream snapshot filenames have one-second resolution. Avoid
         // overwriting (and subsequently deleting) the previous save when a
@@ -292,25 +316,37 @@ void save_project(const Paths& paths, const std::string& name, bool quiet) {
         check(run({"bash", (plugin / "scripts/save.sh").string()}, OutputCapture::diagnostic, plugin_environment(name)), "Saving failed");
         if (!fs::is_regular_file(marker))
             throw std::runtime_error("Resurrect did not complete saving. The previous snapshot was retained.");
+        if (!fs::is_regular_file(layout_marker))
+            throw std::runtime_error("Resurrect could not write a new snapshot to " + paths.snapshots(name).string() +
+                                     ". The previous snapshot was retained.");
         if (!fs::is_regular_file(last))
             throw std::runtime_error("Resurrect did not produce a snapshot. Check the plugin and tmux versions.");
         normalize_snapshot_directories(name, last);
         const auto expected = live_panes(name);
         if (saved_panes(last, false) != expected)
             throw std::runtime_error("Snapshot does not contain all current panes. Saving was not verified.");
-        reset_hook();
+        reset_hooks();
     } catch (...) {
-        reset_hook();
+        reset_hooks();
         // A failing plugin must not replace the last usable text snapshot.
-        if (previous_file) write_atomic(previous_path, previous_content);
-        if (previous_link) {
-            const auto temporary_link = last.string() + ".rollback-" + std::to_string(::getpid());
-            std::error_code link_error;
-            fs::remove(temporary_link, link_error);
-            fs::create_symlink(previous_target, temporary_link);
-            fs::rename(temporary_link, last);
-        } else if (previous_file) write_atomic(last, previous_content);
-        else { std::error_code last_error; fs::remove(last, last_error); }
+        // Rollback is best effort: when the snapshot directory itself is
+        // unwritable it fails too, and must not hide the original error.
+        try {
+            const bool link_unchanged = previous_link && fs::is_symlink(last) && fs::read_symlink(last) == previous_target;
+            const bool content_unchanged = previous_file && fs::is_regular_file(previous_path) &&
+                                           read_file(previous_path) == previous_content;
+            if (previous_file && !content_unchanged) write_atomic(previous_path, previous_content);
+            if (previous_link) {
+                if (!link_unchanged) {
+                    const auto temporary_link = last.string() + ".rollback-" + std::to_string(::getpid());
+                    std::error_code link_error;
+                    fs::remove(temporary_link, link_error);
+                    fs::create_symlink(previous_target, temporary_link);
+                    fs::rename(temporary_link, last);
+                }
+            } else if (previous_file && !content_unchanged) write_atomic(last, previous_content);
+            else if (!previous_file) { std::error_code last_error; fs::remove(last, last_error); }
+        } catch (...) { /* Keep reporting the original failure. */ }
         throw;
     }
     if (!quiet) std::cout << "Saved " << name << "\n";
